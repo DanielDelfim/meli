@@ -2,38 +2,85 @@ import streamlit as st
 import pandas as pd
 import json
 from datetime import datetime, timedelta
+import os
+
+BASE_PATH = r"C:/Users/dmdel/OneDrive/Aplicativos"
+DESIGNER_PATH = os.path.join(BASE_PATH, "Designer")
 
 # --- Função para carregar JSON ---
-def carregar_json_para_df(json_path):
-    try:
-        with open(json_path, "r", encoding="utf-8") as f:
-            vendas_raw = json.load(f)
-    except FileNotFoundError:
-        raise FileNotFoundError(f"Arquivo '{json_path}' não encontrado.")
 
-    vendas = []
-    for pedido in vendas_raw:
-        data = pedido.get("date_created")
-        if not data:
-            continue
+def carregar_json_para_df(json_path: str) -> pd.DataFrame:
+    """
+    Carrega um arquivo JSON de vendas do Mercado Livre e retorna como DataFrame.
+    Adiciona uma coluna 'codigo_do_anuncio' extraída de order_items[0]['item']['id'].
+    """
 
-        for item in pedido.get("order_items", []):
-            vendas.append({
-                "Data da venda": data,
-                "Produto": item["item"]["title"],
-                "Quantidade": item["quantity"],
-                "Valor total": item["unit_price"] * item["quantity"]
-            })
+    if not os.path.exists(json_path):
+        raise FileNotFoundError(f"Arquivo não encontrado: {json_path}")
 
-    if not vendas:
-        return pd.DataFrame()
+    with open(json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
 
-    df = pd.DataFrame(vendas)
-    df["Data da venda"] = pd.to_datetime(df["Data da venda"], utc=True, errors="coerce")
-    df["Data da venda"] = df["Data da venda"].dt.tz_convert("America/Sao_Paulo").dt.tz_localize(None)
-    df["period"] = df["Data da venda"].dt.to_period("M")
+    if not isinstance(data, list):
+        data = [data]
+
+    df = pd.DataFrame(data)
+
+    # --- Extrair Data da venda ---
+    if "date_created" in df.columns:
+        df["Data da venda"] = pd.to_datetime(df["date_created"], errors="coerce")
+    elif "Data da venda" not in df.columns:
+        df["Data da venda"] = pd.NaT
+
+    # --- Extrair código do anúncio ---
+    def extrair_codigo(order_items):
+        try:
+            if isinstance(order_items, list) and len(order_items) > 0:
+                return order_items[0].get("item", {}).get("id", None)
+            return None
+        except Exception:
+            return None
+
+    if "order_items" in df.columns:
+        df["codigo_do_anuncio"] = df["order_items"].apply(extrair_codigo)
+    else:
+        df["codigo_do_anuncio"] = None
+
+    # --- Valor total da venda ---
+    if "total_amount" in df.columns:
+        df["Valor total"] = pd.to_numeric(df["total_amount"], errors="coerce").fillna(0)
+    else:
+        df["Valor total"] = 0
+
+    # --- Quantidade de itens vendidos ---
+    def extrair_quantidade(order_items):
+        try:
+            if isinstance(order_items, list) and len(order_items) > 0:
+                return order_items[0].get("quantity", 1)
+            return 1
+        except Exception:
+            return 1
+
+    if "order_items" in df.columns:
+        df["Quantidade"] = df["order_items"].apply(extrair_quantidade)
+    else:
+        df["Quantidade"] = 1
+
+    # --- Produto (Título) ---
+    def extrair_titulo(order_items):
+        try:
+            if isinstance(order_items, list) and len(order_items) > 0:
+                return order_items[0].get("item", {}).get("title", "Produto desconhecido")
+            return "Produto desconhecido"
+        except Exception:
+            return "Produto desconhecido"
+
+    if "order_items" in df.columns:
+        df["Produto"] = df["order_items"].apply(extrair_titulo)
+    else:
+        df["Produto"] = "Produto desconhecido"
+
     return df
-
 
 # --- Preparar períodos (para Mensal) ---
 def preparar_periodos(df):

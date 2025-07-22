@@ -2,17 +2,13 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
-from utils.utils_dashboard import carregar_json_para_df, preparar_periodos, aplicar_filtro
-
-import streamlit as st
-import pandas as pd
-import plotly.express as px
-from datetime import datetime
 from utils.utils_dashboard import carregar_json_para_df
+
 
 def render_sp(start_date=None, end_date=None):
     st.header("📍 Dashboard de Vendas — São Paulo")
 
+    # --- Carregar JSON ---
     try:
         df = carregar_json_para_df("C:/Users/dmdel/OneDrive/Aplicativos/Designer/backup_vendas_sp.json")
     except FileNotFoundError:
@@ -22,6 +18,12 @@ def render_sp(start_date=None, end_date=None):
     if df.empty:
         st.warning("Nenhuma venda encontrada para SP.")
         return
+
+    # --- Garantir tipo datetime e remover timezone ---
+    if "Data da venda" in df.columns:
+        df["Data da venda"] = pd.to_datetime(df["Data da venda"], errors="coerce")
+        if pd.api.types.is_datetime64tz_dtype(df["Data da venda"]):
+            df["Data da venda"] = df["Data da venda"].dt.tz_localize(None)
 
     # --- Se não vier data da página Home, usar padrão: 01 do mês até hoje ---
     if not start_date or not end_date:
@@ -61,6 +63,7 @@ def render_sp(start_date=None, end_date=None):
         lambda x: f"R$ {x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     )
     st.dataframe(df_display, use_container_width=True)
+
 
 def gerar_tabela_previsao(df, df_resumo):
     """Tabela de previsão de vendas 7 e 15 dias."""

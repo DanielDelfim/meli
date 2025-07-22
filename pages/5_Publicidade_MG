@@ -1,0 +1,19 @@
+import streamlit as st
+from dashboard.mg_dashboard_publicidade import render_mg_publicidade
+import subprocess
+
+st.set_page_config(page_title="Publicidade MG", layout="wide")
+
+st.title("📢 Publicidade — Minas Gerais (MG)")
+
+# Botão para atualizar publicidade MG
+if st.button("🔄 Atualizar Publicidade MG"):
+    with st.spinner("Atualizando dados de publicidade MG..."):
+        try:
+            subprocess.run(["python", "atualizar_jsons_ads.py"], check=True)
+            st.success("✅ Publicidade MG atualizada com sucesso!")
+        except subprocess.CalledProcessError as e:
+            st.error(f"❌ Erro ao atualizar publicidade MG: {e}")
+
+st.markdown("---")
+render_mg_publicidade()

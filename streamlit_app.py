@@ -10,6 +10,16 @@ st.set_page_config(page_title="Dashboard Vendas", layout="wide")
 
 st.title("📊 Dashboard de Vendas — Mercado Livre")
 
+st.markdown(
+    """
+    **Navegue pelas páginas no menu lateral:**
+    - **Página 2:** Vendas SP  
+    - **Página 3:** Vendas MG  
+    - **Página 4:** Publicidade SP  
+    - **Página 5:** Publicidade MG  
+    """
+)
+
 # --- Botão para atualizar vendas ---
 if st.button("🔄 Atualizar Vendas Agora"):
     with st.spinner("Buscando pedidos atualizados..."):
