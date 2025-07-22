@@ -1,26 +1,17 @@
-import json
-import sys
-from pathlib import Path
-from ml_client import save_orders
+from ml_client import save_orders_incremental, load_config
 
-CONFIG_PATH = Path("config.json")
+def main():
+    for loja in ["MG", "SP"]:
+        cfg = load_config(loja)
+        seller_id = cfg["seller_id"]
+        output_path = cfg["json_path"]
 
-def main(store=None):
-    cfg = json.load(open(CONFIG_PATH, encoding="utf-8"))
-
-    # Se store não for passado, atualiza tudo
-    if store is None:
-        stores = ["MG", "SP"]
-    else:
-        stores = [store]
-
-    for loja in stores:
-        seller_id = cfg[loja]["seller_id"]
-        output_path = cfg[loja]["json_path"]
-        print(f"\nBuscando pedidos da conta {loja} (seller_id={seller_id})...")
-
-        save_orders(loja, seller_id, output_path)
+        print(f"[INFO] Atualizando pedidos de {loja} (incremental)...")
+        novos = save_orders_incremental(loja, seller_id, output_path)
+        if novos == 0:
+            print(f"[INFO] Nenhum novo pedido encontrado para {loja}.")
+        else:
+            print(f"[INFO] {novos} novos pedidos adicionados ao {loja}.")
 
 if __name__ == "__main__":
-    arg = sys.argv[1] if len(sys.argv) > 1 else None
-    main(arg)
+    main()
