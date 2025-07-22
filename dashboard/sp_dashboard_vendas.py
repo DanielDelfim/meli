@@ -1,68 +1,59 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+from datetime import datetime
 from utils.utils_dashboard import carregar_json_para_df, preparar_periodos, aplicar_filtro
 
-def render_sp():
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+from datetime import datetime
+from utils.utils_dashboard import carregar_json_para_df
+
+def render_sp(start_date=None, end_date=None):
     st.header("📍 Dashboard de Vendas — São Paulo")
 
     try:
         df = carregar_json_para_df("C:/Users/dmdel/OneDrive/Aplicativos/Designer/backup_vendas_sp.json")
-    except FileNotFoundError as e:
-        st.error(str(e))
+    except FileNotFoundError:
+        st.error("Arquivo de vendas SP não encontrado!")
         return
 
     if df.empty:
-        st.warning("Nenhuma venda encontrada no JSON.")
+        st.warning("Nenhuma venda encontrada para SP.")
         return
 
-    # --- Prepara períodos ---
-    labels, label_map = preparar_periodos(df)
+    # --- Se não vier data da página Home, usar padrão: 01 do mês até hoje ---
+    if not start_date or not end_date:
+        start_date = datetime.today().replace(day=1).date()
+        end_date = datetime.today().date()
 
-    # --- Filtro de período ---
-    modo = st.sidebar.radio("Filtrar por:", ["Diário", "Mensal", "Últimos 15 dias"])
-    mask, filtro_descr = aplicar_filtro(df, modo)
-
-    if modo == "Diário":
-        st.sidebar.header("Filtro Diário")
-        start_date = st.sidebar.date_input("Data inicial", value=df["Data da venda"].min().date())
-        end_date = st.sidebar.date_input("Data final", value=df["Data da venda"].max().date())
-        start_dt = pd.to_datetime(start_date)
-        end_dt = pd.to_datetime(end_date) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
-        mask = (df["Data da venda"] >= start_dt) & (df["Data da venda"] <= end_dt)
-        filtro_descr = f"{start_dt.strftime('%d/%m/%y')} → {end_dt.strftime('%d/%m/%y')}"
-
-
-    if modo == "Mensal":
-        st.sidebar.header("Filtro Mensal")
-        selecionados = st.sidebar.multiselect("Mês/Ano", options=labels, default=labels)
-        sel_periods = [p for p, lbl in label_map.items() if lbl in selecionados]
-        mask = df["period"].isin(sel_periods)
-        filtro_descr = ", ".join(selecionados)
-
+    # --- Filtro de datas ---
+    start_dt = pd.to_datetime(start_date)
+    end_dt = pd.to_datetime(end_date) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+    mask = (df["Data da venda"] >= start_dt) & (df["Data da venda"] <= end_dt)
     dff = df[mask]
+
     if dff.empty:
-        st.warning("Nenhuma venda encontrada para o período selecionado.")
+        st.warning("Nenhuma venda encontrada no período selecionado.")
         return
 
-    # --- Resumo de vendas ---
+    # --- Resumo ---
     df_resumo = (
         dff.groupby("Produto", as_index=False)
         .agg({"Quantidade": "sum", "Valor total": "sum"})
         .sort_values("Valor total", ascending=False)
     )
 
-    # --- Métricas principais ---
+    # --- Métricas ---
     total_qt = int(dff["Quantidade"].sum())
     total_vl = dff["Valor total"].sum()
     col1, col2 = st.columns(2)
     col1.metric("Itens vendidos", total_qt)
-    col2.metric(
-        "Faturamento (R$)",
-        f"R$ {total_vl:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    )
+    col2.metric("Faturamento (R$)",
+        f"R$ {total_vl:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
 
-    st.subheader(f"{modo} ➔ {filtro_descr}")
+    st.subheader(f"Período ➔ {start_date.strftime('%d/%m/%y')} → {end_date.strftime('%d/%m/%y')}")
 
     # --- Tabela principal ---
     df_display = df_resumo.copy()
@@ -70,14 +61,6 @@ def render_sp():
         lambda x: f"R$ {x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     )
     st.dataframe(df_display, use_container_width=True)
-
-    # --- Previsão de vendas (últimos 15 dias) ---
-    if modo == "Últimos 15 dias":
-        gerar_tabela_previsao(df, df_resumo)
-
-    # --- Curva ABC Top 15 ---
-    gerar_curva_abc(df_resumo)
-
 
 def gerar_tabela_previsao(df, df_resumo):
     """Tabela de previsão de vendas 7 e 15 dias."""
