@@ -1,0 +1,34 @@
+# Ignorar caches do Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Ignorar arquivos de log
+*.log
+
+# Ignorar arquivos temporários do sistema
+.DS_Store
+Thumbs.db
+
+# Ignorar ambientes virtuais
+.venv/
+venv/
+env/
+
+# Ignorar configurações do VSCode
+.vscode/
+
+# Ignorar arquivos de backup
+*.bak
+*.tmp
+
+# Ignorar pastas do Streamlit
+.streamlit/
+
+# Ignorar dados sensíveis (tokens e backups)
+tokens/
+backup/
+*.json
+
+# Ignorar arquivos Excel temporários
+~$*.xlsx
