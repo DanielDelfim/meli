@@ -3,44 +3,126 @@ import pandas as pd
 import json
 from datetime import datetime, timedelta
 import os
+from zoneinfo import ZoneInfo
+
+TZ = ZoneInfo("America/Sao_Paulo")
 
 BASE_PATH = r"C:/Users/dmdel/OneDrive/Aplicativos"
 DESIGNER_PATH = os.path.join(BASE_PATH, "Designer")
 
 # --- Função para carregar JSON ---
 
-def carregar_json_para_df(json_path: str) -> pd.DataFrame:
-    """
-    Carrega um arquivo JSON de vendas do Mercado Livre e retorna como DataFrame.
-    Adiciona uma coluna 'codigo_do_anuncio' extraída de order_items[0]['item']['id'].
-    """
+def carregar_json_para_df(caminho_json: str) -> pd.DataFrame:
+    import json
+    import pandas as pd
 
-    if not os.path.exists(json_path):
-        raise FileNotFoundError(f"Arquivo não encontrado: {json_path}")
+    try:
+        with open(caminho_json, "r", encoding="utf-8") as f:
+            vendas_raw = json.load(f)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"❌ Arquivo {caminho_json} não encontrado!")
 
-    with open(json_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    vendas = []
+    for pedido in vendas_raw:
+        data = pedido.get("date_created")
+        if not data:
+            continue
+        for item in pedido.get("order_items", []):
+            vendas.append({
+                "Data da venda": data,
+                "Produto": item["item"]["title"],
+                "Quantidade": item["quantity"],
+                "Valor total": item["unit_price"] * item["quantity"],
+                "order_items": pedido.get("order_items", []),
+                "total_amount": pedido.get("total_amount", 0)
+            })
 
-    if not isinstance(data, list):
-        data = [data]
+    df = pd.DataFrame(vendas)
+    if df.empty:
+        return df
 
-    df = pd.DataFrame(data)
+    # ---- Timezone: mantém tz-aware em America/Sao_Paulo ----
+    df["Data da venda"] = (
+        pd.to_datetime(df["Data da venda"], utc=True, errors="coerce")
+          .dt.tz_convert(TZ)
+    )
 
-    # --- Extrair Data da venda ---
-    if "date_created" in df.columns:
-        df["Data da venda"] = pd.to_datetime(df["date_created"], errors="coerce")
-    elif "Data da venda" not in df.columns:
-        df["Data da venda"] = pd.NaT
+    # period funciona com tz-aware também
+    df["period"] = df["Data da venda"].dt.to_period("M")
+
+    # --- Extrair código / quantidade / título / valor ---
+    df["codigo_do_anuncio"] = df.get("order_items", None).apply(extrair_codigo)
+    df["Quantidade"] = df.get("order_items", None).apply(extrair_quantidade)
+    df["Produto"] = df.get("order_items", None).apply(extrair_titulo)
+    df["Valor total"] = pd.to_numeric(df.get("total_amount", 0), errors="coerce").fillna(0)
+
+    return df
+
+# --- Extrair código do anúncio ---
+def extrair_codigo(order_items):
+    try:
+        if isinstance(order_items, list) and len(order_items) > 0:
+            return order_items[0].get("item", {}).get("id", None)
+        return None
+    except Exception:
+        return None
+
+# --- Quantidade de itens vendidos ---
+def extrair_quantidade(order_items):
+    try:
+        if isinstance(order_items, list) and len(order_items) > 0:
+            return order_items[0].get("quantity", 1)
+        return 1
+    except Exception:
+        return 1
+
+# --- Produto (Título) ---
+def extrair_titulo(order_items):
+    try:
+        if isinstance(order_items, list) and len(order_items) > 0:
+            return order_items[0].get("item", {}).get("title", "Produto desconhecido")
+        return "Produto desconhecido"
+    except Exception:
+        return "Produto desconhecido"
+
+# Adicione o processamento extra dentro da função carregar_json_para_df
+def carregar_json_para_df(caminho_json: str) -> pd.DataFrame:
+    import json
+    import pandas as pd
+
+    try:
+        with open(caminho_json, "r", encoding="utf-8") as f:
+            vendas_raw = json.load(f)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"❌ Arquivo {caminho_json} não encontrado!")
+
+    vendas = []
+    for pedido in vendas_raw:
+        data = pedido.get("date_created")
+        if not data:
+            continue
+        for item in pedido.get("order_items", []):
+            vendas.append({
+                "Data da venda": data,
+                "Produto": item["item"]["title"],
+                "Quantidade": item["quantity"],
+                "Valor total": item["unit_price"] * item["quantity"],
+                "order_items": pedido.get("order_items", []),
+                "total_amount": pedido.get("total_amount", 0)
+            })
+
+    df = pd.DataFrame(vendas)
+    if df.empty:
+        return df
+
+    # --- Corrigir timezone ---
+    df["Data da venda"] = pd.to_datetime(df["Data da venda"], utc=True, errors="coerce")
+    df["Data da venda"] = df["Data da venda"].dt.tz_convert("America/Sao_Paulo")  # Ajusta para SP
+    df["Data da venda"] = df["Data da venda"].dt.tz_localize(None)  # Remove o timezone
+
+    df["period"] = df["Data da venda"].dt.to_period("M")
 
     # --- Extrair código do anúncio ---
-    def extrair_codigo(order_items):
-        try:
-            if isinstance(order_items, list) and len(order_items) > 0:
-                return order_items[0].get("item", {}).get("id", None)
-            return None
-        except Exception:
-            return None
-
     if "order_items" in df.columns:
         df["codigo_do_anuncio"] = df["order_items"].apply(extrair_codigo)
     else:
@@ -53,28 +135,12 @@ def carregar_json_para_df(json_path: str) -> pd.DataFrame:
         df["Valor total"] = 0
 
     # --- Quantidade de itens vendidos ---
-    def extrair_quantidade(order_items):
-        try:
-            if isinstance(order_items, list) and len(order_items) > 0:
-                return order_items[0].get("quantity", 1)
-            return 1
-        except Exception:
-            return 1
-
     if "order_items" in df.columns:
         df["Quantidade"] = df["order_items"].apply(extrair_quantidade)
     else:
         df["Quantidade"] = 1
 
     # --- Produto (Título) ---
-    def extrair_titulo(order_items):
-        try:
-            if isinstance(order_items, list) and len(order_items) > 0:
-                return order_items[0].get("item", {}).get("title", "Produto desconhecido")
-            return "Produto desconhecido"
-        except Exception:
-            return "Produto desconhecido"
-
     if "order_items" in df.columns:
         df["Produto"] = df["order_items"].apply(extrair_titulo)
     else:
@@ -97,26 +163,56 @@ def preparar_periodos(df):
 
 
 # --- Aplicar filtro ---
-def aplicar_filtro(df, modo):
+def aplicar_filtro(df, modo, titulo=None):
     mask = pd.Series(True, index=df.index)
     filtro_descr = ""
 
+    # Determinar colunas de data (compatível com vendas ou publicidade)
+    if "Data da venda" in df.columns:
+        col_data = "Data da venda"
+    elif "desde" in df.columns:
+        col_data = "desde"
+    else:
+        st.error("❌ Nenhuma coluna de data encontrada no DataFrame.")
+        return mask, "Sem período"
+
+    if df[col_data].dt.tz is None:
+        df[col_data] = df[col_data].dt.tz_localize(TZ)
+
+    # Obter intervalos mínimo e máximo
+    min_date = df[col_data].min().date()
+    max_date = df[col_data].max().date()
+    today = datetime.today().date()
+
     if modo == "Diário":
-        st.sidebar.header("Filtro Diário")
-        first_day = datetime.today().replace(day=1).date()
-        today = datetime.today().date()
+        st.sidebar.header(f"Filtro Diário — {titulo}" if titulo else "Filtro Diário")
 
-        start_date = st.sidebar.date_input("Data inicial", value=first_day)
-        end_date = st.sidebar.date_input("Data final", value=today)
+        # Datas mín/máx (no tz local)
+        min_date = df[col_data].min().astimezone(TZ).date()
+        max_date = df[col_data].max().astimezone(TZ).date()
+        today = datetime.now(TZ).date()
 
-        start_dt = pd.to_datetime(start_date)
-        end_dt = pd.to_datetime(end_date) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+        default_start = today if min_date <= today <= max_date else min_date
+        default_end = today if min_date <= today <= max_date else max_date
 
-        mask = (df["Data da venda"] >= start_dt) & (df["Data da venda"] <= end_dt)
-        filtro_descr = f"{start_dt.strftime('%d/%m/%y')} → {end_dt.strftime('%d/%m/%y')}"
+        start_date = st.sidebar.date_input("Data inicial", value=default_start,
+                                           min_value=min_date, max_value=max_date,
+                                           key=f"start_{titulo}")
+        end_date = st.sidebar.date_input("Data final", value=default_end,
+                                         min_value=min_date, max_value=max_date,
+                                         key=f"end_{titulo}")
+
+        start_dt = pd.Timestamp(start_date, tz=TZ)
+        end_dt = pd.Timestamp(end_date, tz=TZ) + pd.Timedelta(days=1)
+
+        mask = (df[col_data] >= start_dt) & (df[col_data] < end_dt)
+        filtro_descr = f"{start_dt.strftime('%d/%m/%y')} → {(end_dt - pd.Timedelta(seconds=1)).strftime('%d/%m/%y')}"
+
 
     elif modo == "Mensal":
-        st.sidebar.header("Filtro Mensal")
+        st.sidebar.header(f"Filtro Mensal — {titulo}" if titulo else "Filtro Mensal")
+        if "period" not in df.columns:
+            df["period"] = df[col_data].dt.to_period("M")
         labels, label_map = preparar_periodos(df)
         selecionados = st.sidebar.multiselect("Mês/Ano", options=labels, default=labels)
         sel_periods = [p for p, lbl in label_map.items() if lbl in selecionados]
@@ -124,14 +220,12 @@ def aplicar_filtro(df, modo):
         filtro_descr = ", ".join(selecionados)
 
     elif modo == "Últimos 15 dias":
-        today = datetime.today().date()
-        start15 = pd.to_datetime(today - timedelta(days=15))
-        end15 = pd.to_datetime(today)
-        mask = (df["Data da venda"] >= start15) & (df["Data da venda"] <= end15)
-        filtro_descr = f"Últimos 15 dias ({start15.strftime('%d/%m/%y')} – {end15.strftime('%d/%m/%y')})"
+        end15 = df[col_data].max()
+        start15 = end15 - pd.Timedelta(days=15)
+        mask = (df[col_data] >= start15) & (df[col_data] < end15 + pd.Timedelta(days=1))
+        filtro_descr = f"Últimos 15 dias ({start15.astimezone(TZ).strftime('%d/%m/%y')} – {end15.astimezone(TZ).strftime('%d/%m/%y')})"
 
     return mask, filtro_descr
-
 
 # --- Renderizar dashboard ---
 def render_dashboard(titulo, json_path):

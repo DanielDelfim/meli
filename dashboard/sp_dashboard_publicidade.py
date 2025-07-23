@@ -1,58 +1,52 @@
 import streamlit as st
 import pandas as pd
-from utils.utils_publicidade import carregar_ads_json
-from utils.utils_dashboard import carregar_json_para_df, DESIGNER_PATH
+from utils.utils_dashboard import carregar_json_para_df
+from utils.utils_publicidade import carregar_ads_json, DESIGNER_PATH
 
 JSON_SP = f"{DESIGNER_PATH}/backup_vendas_sp.json"
 ADS_SP = f"{DESIGNER_PATH}/ads_sp.json"
+
 
 def render_sp_publicidade():
     st.header("📢 Publicidade — São Paulo (SP)")
 
     # --- Carregar dados de publicidade ---
-    try:
-        df_ads = carregar_ads_json(ADS_SP)
-    except FileNotFoundError:
-        st.error("Arquivo de publicidade SP não encontrado!")
+    df_ads = carregar_ads_json(ADS_SP)
+    if df_ads.empty:
+        st.warning("Nenhum dado de publicidade encontrado.")
         return
 
-    # Garantir datas em datetime
+    # Ajustar datas em df_ads
     if "desde" in df_ads.columns:
         df_ads["desde"] = pd.to_datetime(df_ads["desde"], errors="coerce", dayfirst=True)
     if "ate" in df_ads.columns:
         df_ads["ate"] = pd.to_datetime(df_ads["ate"], errors="coerce", dayfirst=True)
 
-    data_inicio = df_ads["desde"].min() if "desde" in df_ads.columns else None
-    data_fim = df_ads["ate"].max() if "ate" in df_ads.columns else None
+    # Determinar período padrão
+    data_inicio_default = df_ads["desde"].min().date() if "desde" in df_ads.columns else pd.Timestamp.today().date()
+    data_fim_default = df_ads["ate"].max().date() if "ate" in df_ads.columns else pd.Timestamp.today().date()
 
-    # --- Filtro lateral de datas ---
-    st.sidebar.header("Filtro de Datas")
-    start_date = st.sidebar.date_input("Data inicial", value=data_inicio.date() if pd.notnull(data_inicio) else None)
-    end_date = st.sidebar.date_input("Data final", value=data_fim.date() if pd.notnull(data_fim) else None)
+    # --- Filtro Diário ---
+    st.sidebar.header("Filtro Diário — Publicidade SP")
+    start_date = st.sidebar.date_input("Data inicial", value=data_inicio_default)
+    end_date = st.sidebar.date_input("Data final", value=data_fim_default)
 
-    # --- Filtro por campanha ---
-    campanhas = df_ads["campanha"].dropna().unique().tolist() if "campanha" in df_ads.columns else []
-    campanha_selecionada = st.selectbox("Selecione a Campanha", ["Todas"] + campanhas)
-    df_filtrado = df_ads if campanha_selecionada == "Todas" else df_ads[df_ads["campanha"] == campanha_selecionada]
+    start_dt = pd.to_datetime(start_date)
+    end_dt = pd.to_datetime(end_date) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
 
-    # --- Carregar JSON de vendas ---
-    try:
-        df_vendas_sp = carregar_json_para_df(JSON_SP)
-    except FileNotFoundError:
-        st.error("Arquivo de vendas SP não encontrado!")
-        return
+    mask = (df_ads["desde"] >= start_dt) & (df_ads["ate"] <= end_dt)
+    df_filtrado = df_ads[mask]
 
-    # Remover timezone para evitar erros de comparação
-    df_vendas_sp["Data da venda sem tz"] = pd.to_datetime(df_vendas_sp["Data da venda"], errors="coerce").dt.tz_localize(None)
-    start_dt, end_dt = pd.to_datetime(start_date), pd.to_datetime(end_date) + pd.Timedelta(days=1)
-    df_vendas_periodo = df_vendas_sp[(df_vendas_sp["Data da venda sem tz"] >= start_dt) & (df_vendas_sp["Data da venda sem tz"] <= end_dt)]
+    st.subheader(f"Período ➔ {start_dt.strftime('%d/%m/%Y')} → {end_dt.strftime('%d/%m/%Y')}")
 
-    # --- Receita total filtrada pelos anúncios ---
-    anuncios_ads = df_filtrado["codigo_do_anuncio"].dropna().unique().tolist()
-    vendas_relacionadas = df_vendas_periodo[df_vendas_periodo["codigo_do_anuncio"].isin(anuncios_ads)]
+    # --- Carregar dados de vendas ---
+    df_vendas_sp = carregar_json_para_df(JSON_SP)
+    df_vendas_sp["Data da venda"] = pd.to_datetime(df_vendas_sp["Data da venda"], errors="coerce")
+    df_vendas_periodo = df_vendas_sp[(df_vendas_sp["Data da venda"] >= start_dt) & (df_vendas_sp["Data da venda"] <= end_dt)]
 
-    receita_total = vendas_relacionadas["Valor total"].sum()
+    # --- Métricas ---
     receita_ads = df_filtrado["receita_(moeda_local)"].sum() if "receita_(moeda_local)" in df_filtrado.columns else 0
+    receita_total = df_vendas_periodo["Valor total"].sum()
     receita_organica = max(receita_total - receita_ads, 0)
     investimento = df_filtrado["investimento_(moeda_local)"].sum() if "investimento_(moeda_local)" in df_filtrado.columns else 0
 
@@ -70,7 +64,7 @@ def render_sp_publicidade():
     st.subheader("Tabela de Publicidade")
     st.dataframe(df_filtrado[colunas], use_container_width=True)
 
-    # --- Métricas gerais ---
+    # --- Cards ---
     impressoes = df_filtrado["impressoes"].sum() if "impressoes" in df_filtrado.columns else 0
     cliques = df_filtrado["cliques"].sum() if "cliques" in df_filtrado.columns else 0
     vendas_ads = df_filtrado["vendas_por_publicidade_(diretas_+_indiretas)"].sum() if "vendas_por_publicidade_(diretas_+_indiretas)" in df_filtrado.columns else 0
