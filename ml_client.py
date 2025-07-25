@@ -12,16 +12,7 @@ LAST_UPDATE_FILE = token_dir / "last_update.json"
 
 
 def load_config(loja: str) -> dict:
-    """
-    Carrega as configurações de ambiente para a loja (SP ou MG).
-    Espera encontrar as variáveis:
-      - <LOJA>_JSON_PATH
-      - <LOJA>_CLIENT_ID
-      - <LOJA>_CLIENT_SECRET
-      - <LOJA>_SELLER_ID
-      - <LOJA>_REDIRECT_URI
-    """
-    prefix = loja.upper()
+    prefix = loja.upper()  # “SP” ou “MG”
 
     json_path = os.getenv(f"{prefix}_JSON_PATH")
     if not json_path:
@@ -39,24 +30,38 @@ def load_config(loja: str) -> dict:
 def get_valid_token(store: str) -> str:
     """
     Retorna um token válido para a loja, fazendo refresh se necessário.
-    Procura o arquivo tokens/<store>.json e, se não existir, dispara erro.
+    Se não existir arquivo, tenta carregar de ENV var <STORE>_TOKEN_JSON.
     """
     path = token_dir / f"{store}.json"
-    if not path.exists():
-        raise FileNotFoundError(f"Token não encontrado para {store}. Execute a autorização primeiro.")
 
-    token = json.load(open(path, encoding="utf-8"))
-    # Se estiver expirando em menos de 60s, atualiza
+    if not path.exists():
+        # Tenta bootstrap via ENV
+        env_key = f"{store}_TOKEN_JSON"
+        raw = os.getenv(env_key)
+        if not raw:
+            raise FileNotFoundError(
+                f"Token não encontrado para {store}. Nem arquivo nem ENV var {env_key}."
+            )
+        try:
+            token = json.loads(raw)
+        except json.JSONDecodeError:
+            raise ValueError(f"Conteúdo de {env_key} não é JSON válido.")
+        # assegura obtido_at
+        if "_obtained_at" not in token:
+            token["_obtained_at"] = int(time.time())
+        # salva para uso futuro
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(token, f, ensure_ascii=False, indent=2)
+    else:
+        token = json.load(open(path, encoding="utf-8"))
+
+    # Refresh se próximo de expirar
     if time.time() > token.get("_obtained_at", 0) + token.get("expires_in", 0) - 60:
         token = refresh_token(store)
-
     return token["access_token"]
 
 
 def refresh_token(store: str) -> dict:
-    """
-    Refresha o token de acesso usando o refresh_token.
-    """
     cfg = load_config(store)
     token_path = token_dir / f"{store}.json"
     token = json.load(open(token_path, encoding="utf-8"))
@@ -79,14 +84,10 @@ def refresh_token(store: str) -> dict:
 
 
 def fetch_orders_incremental(store: str, seller_id: int, status: str = "paid") -> list:
-    """
-    Busca de forma incremental todos os pedidos com status dado desde a última data salva.
-    """
     token = get_valid_token(store)
     headers = {"Authorization": f"Bearer {token}"}
     url = "https://api.mercadolibre.com/orders/search"
 
-    # Carrega última data
     last_update = None
     if LAST_UPDATE_FILE.exists():
         data = json.load(open(LAST_UPDATE_FILE, encoding="utf-8"))
@@ -110,14 +111,10 @@ def fetch_orders_incremental(store: str, seller_id: int, status: str = "paid") -
 
 
 def save_orders_incremental(store: str, seller_id: int, path: str) -> int:
-    """
-    Adiciona apenas pedidos novos ao JSON existente e retorna a quantidade adicionada.
-    """
     novos = fetch_orders_incremental(store, seller_id)
     if not novos:
         return 0
 
-    # Lê pedidos existentes
     try:
         with open(path, "r", encoding="utf-8") as f:
             existentes = json.load(f)
@@ -128,16 +125,11 @@ def save_orders_incremental(store: str, seller_id: int, path: str) -> int:
     filtrados = [p for p in novos if p["id"] not in ids_existentes]
     atualizados = existentes + filtrados
 
-    # Salva em disco
     with open(path, "w", encoding="utf-8") as f:
         json.dump(atualizados, f, ensure_ascii=False, indent=2)
 
-    # Atualiza timestamp
     agora = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-    if LAST_UPDATE_FILE.exists():
-        data = json.load(open(LAST_UPDATE_FILE, encoding="utf-8"))
-    else:
-        data = {}
+    data = json.load(open(LAST_UPDATE_FILE, encoding="utf-8")) if LAST_UPDATE_FILE.exists() else {}
     data[store] = agora
     with open(LAST_UPDATE_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
