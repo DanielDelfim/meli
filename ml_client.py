@@ -6,13 +6,22 @@ from pathlib import Path
 from datetime import datetime
 
 # Diretórios para tokens e último update
-TOKEN_DIR = Path("tokens")
-TOKEN_DIR.mkdir(exist_ok=True)
-LAST_UPDATE_FILE = TOKEN_DIR / "last_update.json"
+token_dir = Path("tokens")
+token_dir.mkdir(exist_ok=True)
+LAST_UPDATE_FILE = token_dir / "last_update.json"
 
 
 def load_config(loja: str) -> dict:
-    prefix = loja.upper()  # “SP” ou “MG”
+    """
+    Carrega as configurações de ambiente para a loja (SP ou MG).
+    Espera encontrar as variáveis:
+      - <LOJA>_JSON_PATH
+      - <LOJA>_CLIENT_ID
+      - <LOJA>_CLIENT_SECRET
+      - <LOJA>_SELLER_ID
+      - <LOJA>_REDIRECT_URI
+    """
+    prefix = loja.upper()
 
     json_path = os.getenv(f"{prefix}_JSON_PATH")
     if not json_path:
@@ -28,20 +37,29 @@ def load_config(loja: str) -> dict:
 
 
 def get_valid_token(store: str) -> str:
-    path = TOKEN_DIR / f"{store}.json"
+    """
+    Retorna um token válido para a loja, fazendo refresh se necessário.
+    Procura o arquivo tokens/<store>.json e, se não existir, dispara erro.
+    """
+    path = token_dir / f"{store}.json"
     if not path.exists():
         raise FileNotFoundError(f"Token não encontrado para {store}. Execute a autorização primeiro.")
 
     token = json.load(open(path, encoding="utf-8"))
-    if time.time() > token["_obtained_at"] + token["expires_in"] - 60:
+    # Se estiver expirando em menos de 60s, atualiza
+    if time.time() > token.get("_obtained_at", 0) + token.get("expires_in", 0) - 60:
         token = refresh_token(store)
 
     return token["access_token"]
 
 
 def refresh_token(store: str) -> dict:
+    """
+    Refresha o token de acesso usando o refresh_token.
+    """
     cfg = load_config(store)
-    token = json.load(open(TOKEN_DIR / f"{store}.json", encoding="utf-8"))
+    token_path = token_dir / f"{store}.json"
+    token = json.load(open(token_path, encoding="utf-8"))
 
     payload = {
         "grant_type":    "refresh_token",
@@ -54,18 +72,21 @@ def refresh_token(store: str) -> dict:
 
     token_data = resp.json()
     token_data["_obtained_at"] = int(time.time())
-    with open(TOKEN_DIR / f"{store}.json", "w", encoding="utf-8") as f:
+    with open(token_path, "w", encoding="utf-8") as f:
         json.dump(token_data, f, ensure_ascii=False, indent=2)
 
     return token_data
 
 
 def fetch_orders_incremental(store: str, seller_id: int, status: str = "paid") -> list:
+    """
+    Busca de forma incremental todos os pedidos com status dado desde a última data salva.
+    """
     token = get_valid_token(store)
     headers = {"Authorization": f"Bearer {token}"}
-    base_url = "https://api.mercadolibre.com/orders/search"
+    url = "https://api.mercadolibre.com/orders/search"
 
-    # carrega última data de busca
+    # Carrega última data
     last_update = None
     if LAST_UPDATE_FILE.exists():
         data = json.load(open(LAST_UPDATE_FILE, encoding="utf-8"))
@@ -77,7 +98,7 @@ def fetch_orders_incremental(store: str, seller_id: int, status: str = "paid") -
 
     all_orders = []
     while True:
-        resp = requests.get(base_url, headers=headers, params=params)
+        resp = requests.get(url, headers=headers, params=params)
         resp.raise_for_status()
         batch = resp.json().get("results", [])
         if not batch:
@@ -89,11 +110,14 @@ def fetch_orders_incremental(store: str, seller_id: int, status: str = "paid") -
 
 
 def save_orders_incremental(store: str, seller_id: int, path: str) -> int:
+    """
+    Adiciona apenas pedidos novos ao JSON existente e retorna a quantidade adicionada.
+    """
     novos = fetch_orders_incremental(store, seller_id)
     if not novos:
         return 0
 
-    # lê pedidos existentes
+    # Lê pedidos existentes
     try:
         with open(path, "r", encoding="utf-8") as f:
             existentes = json.load(f)
@@ -104,13 +128,16 @@ def save_orders_incremental(store: str, seller_id: int, path: str) -> int:
     filtrados = [p for p in novos if p["id"] not in ids_existentes]
     atualizados = existentes + filtrados
 
-    # salva
+    # Salva em disco
     with open(path, "w", encoding="utf-8") as f:
         json.dump(atualizados, f, ensure_ascii=False, indent=2)
 
-    # atualiza timestamp
+    # Atualiza timestamp
     agora = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-    data = json.load(open(LAST_UPDATE_FILE, encoding="utf-8")) if LAST_UPDATE_FILE.exists() else {}
+    if LAST_UPDATE_FILE.exists():
+        data = json.load(open(LAST_UPDATE_FILE, encoding="utf-8"))
+    else:
+        data = {}
     data[store] = agora
     with open(LAST_UPDATE_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
