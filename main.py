@@ -1,17 +1,18 @@
-from ml_client import save_orders_incremental, load_config
+from dotenv import load_dotenv
+from ml_client import load_config, save_orders_incremental
 
 def main():
+    # carrega .env em dev; em produção o Render injeta as ENV vars
+    load_dotenv()
+
     for loja in ["MG", "SP"]:
         cfg = load_config(loja)
-        seller_id = cfg["seller_id"]
-        output_path = cfg["json_path"]
-
-        print(f"[INFO] Atualizando pedidos de {loja} (incremental)...")
-        novos = save_orders_incremental(loja, seller_id, output_path)
-        if novos == 0:
-            print(f"[INFO] Nenhum novo pedido encontrado para {loja}.")
+        print(f"[INFO] Atualizando pedidos de {loja}...")
+        novos = save_orders_incremental(loja, int(cfg["seller_id"]), cfg["json_path"])
+        if novos:
+            print(f"[INFO] {novos} novos pedidos adicionados.")
         else:
-            print(f"[INFO] {novos} novos pedidos adicionados ao {loja}.")
+            print("[INFO] Nenhum novo pedido.")
 
 if __name__ == "__main__":
     main()

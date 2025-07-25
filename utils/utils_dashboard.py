@@ -13,8 +13,6 @@ DESIGNER_PATH = os.path.join(BASE_PATH, "Designer")
 # --- Função para carregar JSON ---
 
 def carregar_json_para_df(caminho_json: str) -> pd.DataFrame:
-    import json
-    import pandas as pd
 
     try:
         with open(caminho_json, "r", encoding="utf-8") as f:

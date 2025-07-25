@@ -6,6 +6,9 @@ __pycache__/
 # Ignorar arquivos de log
 *.log
 
+# Ignorar arquivos de env
+*.env
+
 # Ignorar arquivos temporários do sistema
 .DS_Store
 Thumbs.db
@@ -28,7 +31,10 @@ env/
 # Ignorar dados sensíveis (tokens e backups)
 tokens/
 backup/
+# Ignore todos JSON, exceto nosso template
 *.json
+!config.template.json
+
 
 # Ignorar arquivos Excel temporários
 ~$*.xlsx
