@@ -100,8 +100,6 @@ def carregar_ads(file_path: str) -> pd.DataFrame:
     """
     Carrega o arquivo de publicidade (CSV, JSON ou XLSX) e retorna um DataFrame.
     """
-    import os
-    import pandas as pd
 
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Arquivo de publicidade não encontrado: {file_path}")

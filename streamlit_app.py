@@ -15,6 +15,7 @@ st.markdown(
     - **Página 3:** Vendas MG  
     - **Página 4:** Publicidade SP  
     - **Página 5:** Publicidade MG  
+    - **Página 6:** Resultados de Investimento Ads
     """
 )
 

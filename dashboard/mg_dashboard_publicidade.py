@@ -1,74 +1,120 @@
 import streamlit as st
 import pandas as pd
-from utils.utils_publicidade import preparar_dataframe_publicidade, BASE_PATH, DESIGNER_PATH
+import calendar
+import json
+from datetime import datetime
+from pathlib import Path
 from utils.utils_dashboard import carregar_json_para_df
+from utils.utils_publicidade import carregar_ads_json, DESIGNER_PATH
 
-JSON_MG = f"{DESIGNER_PATH}/backup_vendas_mg.json"
-ADS_MG = f"{BASE_PATH}/Relatorio_anuncios_patrocinados_07d_total_MG_NORMALIZADO.xlsx"
+# Paths dos JSONs de publicidade e precificação
+JSON_MG      = f"{DESIGNER_PATH}/backup_vendas_mg.json"
+ADS_WEEK_MG  = f"{DESIGNER_PATH}/ads_mg.json"        # Últimos 7 dias
+ADS_MONTH_MG = f"{DESIGNER_PATH}/ads_mes_mg.json"    # Mês até hoje
+HIST_PATH    = f"{DESIGNER_PATH}/historico_mg.json"  # Histórico de MG
+PREC_PATH    = str(Path(DESIGNER_PATH).parent / "tokens" / "precificacao_meli.json")
 
 
 def render_mg_publicidade():
     st.header("📢 Publicidade — Minas Gerais (MG)")
 
-    df_ads = preparar_dataframe_publicidade(JSON_MG, ADS_MG)
+    # --- Carregar dados de publicidade ---
+    df_week = carregar_ads_json(ADS_WEEK_MG)
+    if df_week.empty:
+        st.warning("Nenhum dado de publicidade encontrado.")
+        return
+    # Converter datas
+    df_week["desde"] = pd.to_datetime(df_week["desde"], format="%d-%b-%Y", dayfirst=True, errors="coerce")
+    df_week["ate"]   = pd.to_datetime(df_week["ate"],   format="%d-%b-%Y", dayfirst=True, errors="coerce")
 
-    if "desde" in df_ads.columns:
-        df_ads["desde"] = pd.to_datetime(df_ads["desde"], errors="coerce", dayfirst=True)
-    if "ate" in df_ads.columns:
-        df_ads["ate"] = pd.to_datetime(df_ads["ate"], errors="coerce", dayfirst=True)
+    # --- Sidebar: filtros ---
+    data_inicio = df_week["desde"].min().date()
+    data_fim    = df_week["ate"].max().date()
+    st.sidebar.header("Filtros — MG")
+    start_date = st.sidebar.date_input("Data inicial", value=data_inicio)
+    end_date   = st.sidebar.date_input("Data final",   value=data_fim)
+    start_dt = pd.to_datetime(start_date)
+    end_dt   = pd.to_datetime(end_date) + pd.Timedelta(days=1)
 
-    data_inicio, data_fim = df_ads["desde"].min(), df_ads["ate"].max()
+    df_filtrado = df_week[(df_week["desde"] < end_dt) & (df_week["ate"] >= start_dt)].copy()
+    has_ads = not df_filtrado.empty
+    st.subheader(f"Período: {start_date.strftime('%d/%m/%Y')} → {end_date.strftime('%d/%m/%Y')}")
 
-    st.sidebar.header("Filtro de Datas")
-    start_date = st.sidebar.date_input("Data inicial", value=data_inicio.date() if pd.notnull(data_inicio) else None)
-    end_date = st.sidebar.date_input("Data final", value=data_fim.date() if pd.notnull(data_fim) else None)
+    # --- Carregar dados de vendas ---
+    df_vendas = carregar_json_para_df(JSON_MG)
+    df_vendas["Data da venda"] = pd.to_datetime(df_vendas["Data da venda"], errors="coerce")
+    mask_v = (df_vendas["Data da venda"] >= start_dt) & (df_vendas["Data da venda"] < end_dt)
+    if has_ads and "codigo_do_anuncio" in df_filtrado and "codigo_do_anuncio" in df_vendas:
+        mask_v &= df_vendas["codigo_do_anuncio"].isin(df_filtrado["codigo_do_anuncio"].unique())
+    df_vendas_periodo = df_vendas[mask_v]
 
-    col1, col2 = st.columns(2)
-    col1.metric("Data Inicial Publicidade", data_inicio.strftime("%d/%m/%Y") if pd.notnull(data_inicio) else "N/A")
-    col2.metric("Data Final Publicidade", data_fim.strftime("%d/%m/%Y") if pd.notnull(data_fim) else "N/A")
+    # --- Métricas MG ---
+    receita_ads    = df_filtrado["receita_(moeda_local)"].sum() if has_ads else 0.0
+    investimento_w = df_filtrado["investimento_(moeda_local)"].sum() if has_ads else 0.0
+    receita_total  = df_vendas_periodo["Valor total"].sum()
+    receita_org    = max(receita_total - receita_ads, 0)
+    acos           = investimento_w / receita_ads * 100 if receita_ads > 0 else 0
+    tacos          = investimento_w / receita_total * 100 if receita_total > 0 else 0
 
-    campanhas = df_ads["campanha"].dropna().unique().tolist() if "campanha" in df_ads.columns else []
-    campanha_selecionada = st.selectbox("Selecione a Campanha", ["Todas"] + campanhas)
-    df_filtrado = df_ads if campanha_selecionada == "Todas" else df_ads[df_ads["campanha"] == campanha_selecionada]
+    # --- Tabela de Publicidade ---
+    if has_ads:
+        st.subheader("Publicidade Detalhada")
+        df_show = df_filtrado.rename(columns={
+            "titulo_do_anuncio_patrocinado": "Título",
+            "impressoes": "Impressões",
+            "cliques": "Cliques",
+            "investimento_(moeda_local)": "Investimento (R$)"
+        })[["Título","Impressões","Cliques","Investimento (R$)"]]
+        st.dataframe(df_show, use_container_width=True, hide_index=True)
 
-    df_vendas_mg = carregar_json_para_df(JSON_MG)
-    df_vendas_mg["Data da venda sem tz"] = pd.to_datetime(df_vendas_mg["Data da venda"], errors="coerce").dt.tz_localize(None)
-    start_dt, end_dt = pd.to_datetime(start_date), pd.to_datetime(end_date) + pd.Timedelta(days=1)
-    df_vendas_periodo = df_vendas_mg[(df_vendas_mg["Data da venda sem tz"] >= start_dt) & (df_vendas_mg["Data da venda sem tz"] <= end_dt)]
+    # --- Métricas Gerais (7 dias) ---
+    st.markdown("### Métricas Gerais (7 dias)")
+    col1, col2, col3, col4 = st.columns(4)
+    ctr = df_filtrado['cliques'].sum() / df_filtrado['impressoes'].sum() * 100 if has_ads else 0
+    cvr = df_filtrado['vendas_por_publicidade_(diretas_+_indiretas)'].sum() / df_filtrado['cliques'].sum() * 100 if has_ads else 0
+    col1.metric("CTR", f"{ctr:.2f}%")
+    col2.metric("CVR", f"{cvr:.2f}%")
+    col3.metric("ACOS", f"{acos:.2f}%")
+    col4.metric("TACOS", f"{tacos:.2f}%")
 
-    receita_ads = df_filtrado["receita_(moeda_local)"].sum() if "receita_(moeda_local)" in df_filtrado.columns else 0
-    receita_total = df_vendas_periodo["Valor total"].sum()
-    receita_organica = max(receita_total - receita_ads, 0)
-    investimento = df_filtrado["investimento_(moeda_local)"].sum() if "investimento_(moeda_local)" in df_filtrado.columns else 0
+    # --- Receitas e Investimento (7 dias) ---
+    st.markdown("### Receitas e Investimento (7 dias)")
+    r1, r2, r3 = st.columns(3)
+    r1.metric("Receita Ads", f"R$ {receita_ads:,.2f}")
+    r2.metric("Receita Orgânica", f"R$ {receita_org:,.2f}")
+    r3.metric("Investimento (7d)", f"R$ {investimento_w:,.2f}")
 
-    acos = (investimento / receita_ads * 100) if receita_ads > 0 else 0
-    tacos = (investimento / receita_total * 100) if receita_total > 0 else 0
+    # --- Previsões ---
+    inv_month    = carregar_ads_json(ADS_MONTH_MG)["investimento_(moeda_local)"].sum()
+    dias_obs     = (df_week['ate'].max() - df_week['desde'].min()).days + 1
+    media_diaria = df_week['investimento_(moeda_local)'].sum() / dias_obs if dias_obs > 0 else 0
+    dias_rest    = calendar.monthrange(datetime.now().year, datetime.now().month)[1] - datetime.now().day
+    prev_rest    = media_diaria * dias_rest
+    proj_mes     = inv_month + prev_rest
+    proj_30      = media_diaria * 30
+    st.markdown("---")
+    st.subheader("Previsões")
+    df_pre = pd.DataFrame({
+        'Métrica': [
+            f"Investimento Até Agora ({datetime.now().strftime('%m/%Y')})",
+            f"Previsão Restante",
+            f"Projeção Total",
+            'Previsão 30 Dias'
+        ],
+        'Valor': [inv_month, prev_rest, proj_mes, proj_30]
+    })
+    df_pre['Valor'] = df_pre['Valor'].apply(lambda x: f"R$ {x:,.2f}")
+    st.dataframe(df_pre, use_container_width=True, hide_index=True)
 
-    colunas = ["campanha", "codigo_do_anuncio", "titulo_do_anuncio_patrocinado", "impressoes", "cliques",
-               "vendas_por_publicidade_(diretas_+_indiretas)", "receita_(moeda_local)", "investimento_(moeda_local)"]
-    colunas = [c for c in colunas if c in df_filtrado.columns]
-
-    st.subheader("Tabela de Publicidade")
-    st.dataframe(df_filtrado[colunas], use_container_width=True)
-
-    impressoes = df_filtrado["impressoes"].sum() if "impressoes" in df_filtrado.columns else 0
-    cliques = df_filtrado["cliques"].sum() if "cliques" in df_filtrado.columns else 0
-    vendas_ads = df_filtrado["vendas_por_publicidade_(diretas_+_indiretas)"].sum() if "vendas_por_publicidade_(diretas_+_indiretas)" in df_filtrado.columns else 0
-    ctr = (cliques / impressoes * 100) if impressoes > 0 else 0
-    cvr = (vendas_ads / cliques * 100) if cliques > 0 else 0
-
-    st.markdown("### Métricas Gerais")
-    col1, col2, col3 = st.columns(3)
-    col1.metric("CTR (Taxa de Cliques)", f"{ctr:.2f}%")
-    col2.metric("CVR (Taxa de Conversão)", f"{cvr:.2f}%")
-    col3.metric("ACOS / TACOS", f"{acos:.2f}% / {tacos:.2f}%")
-
-    st.markdown("### Receitas e Investimento")
-    col4, col5, col6 = st.columns(3)
-    col4.metric("Receita por Ads (R$)", f"R$ {receita_ads:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
-    col5.metric("Receita Orgânica (R$)", f"R$ {receita_organica:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
-    col6.metric("Investimento (R$)", f"R$ {investimento:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
-
+    # --- Cards Receita Geral Período e TACOS Geral ---
+    st.markdown("---")
+    today = datetime.now()
+    first = datetime(today.year, today.month, 1)
+    vendas_mes = df_vendas[(df_vendas['Data da venda'] >= first) & (df_vendas['Data da venda'] <= today)]['Valor total'].sum()
+    tacos_h_global = inv_month / vendas_mes * 100 if vendas_mes > 0 else 0
+    c1, c2 = st.columns(2)
+    c1.metric("Receita Geral dia 1 até hoje", f"R$ {vendas_mes:,.2f}")
+    c2.metric("TACOS Geral", f"{tacos_h_global:.2f}%")
 
 if __name__ == "__main__":
     render_mg_publicidade()
