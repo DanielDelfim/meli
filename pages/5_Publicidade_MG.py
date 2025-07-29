@@ -1,4 +1,4 @@
-from dashboard.mg_dashboard_publicidade import render_mg_publicidade
+from dashboard.dashboard_publicidade import render_publicidade
 
 # Call the main function
-render_mg_publicidade()
+render_publicidade("MG")

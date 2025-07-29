@@ -2,6 +2,32 @@ import time
 from dotenv import load_dotenv
 from ml_client import load_config, save_orders_incremental
 
+import sys
+import time
+
+def atualizar_sp():
+    # ... seu código existente ...
+    pass
+
+def atualizar_mg():
+    # ... seu código existente ...
+    pass
+
+def main_loop():
+    while True:
+        atualizar_sp()
+        atualizar_mg()
+        time.sleep(3600)
+
+def main_once():
+    atualizar_sp()
+    atualizar_mg()
+
+if __name__ == "__main__":
+    if "--once" in sys.argv:
+        main_once()
+    else:
+        main_loop()
 
 def job():
     """

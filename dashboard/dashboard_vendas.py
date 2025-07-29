@@ -1,101 +1,74 @@
+import os
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 from datetime import datetime, timedelta
 from utils.utils_dashboard import carregar_json_para_df
 
-
-def preparar_periodos(df):
-    """Cria lista de meses/anos disponíveis para filtro mensal."""
-    month_map = {
-        1: "Janeiro", 2: "Fevereiro", 3: "Março", 4: "Abril",
-        5: "Maio", 6: "Junho", 7: "Julho", 8: "Agosto",
-        9: "Setembro", 10: "Outubro", 11: "Novembro", 12: "Dezembro"
-    }
-    df["period"] = df["Data da venda"].dt.to_period("M")
-    labels = [f"{month_map[p.month]} {p.year}" for p in sorted(df["period"].unique())]
-    label_map = {p: f"{month_map[p.month]} {p.year}" for p in df["period"].unique()}
-    return labels, label_map
+# Caminhos para os JSONs pré-processados
+BASE_PATH = os.getenv("BASE_PATH", r"C:/Users/dmdel/OneDrive/Aplicativos")
+DESIGNER_PATH = os.path.join(BASE_PATH, "Designer")
+JSON_SP_PP = os.path.join(DESIGNER_PATH, "backup_vendas_sp_pp.json")
+JSON_MG_PP = os.path.join(DESIGNER_PATH, "backup_vendas_mg_pp.json")
 
 
-def aplicar_filtro(df, modo, titulo=None):
-    """Aplica filtro por modo (Diário, Mensal ou Últimos 15 dias)."""
-    mask = pd.Series(True, index=df.index)
-    filtro_descr = ""
+def aplicar_filtro(df, modo, key_prefix=""):
+    """Aplica filtro Diário, Mensal ou Últimos 15 dias."""
+    desc = ""
+    hoje = datetime.now().date()
 
     if modo == "Diário":
-        st.sidebar.header(f"Filtro Diário — {titulo}" if titulo else "Filtro Diário")
-        today = datetime.today().date()
-        start_date = st.sidebar.date_input("Data inicial", value=today, key=f"start_{titulo}")
-        end_date = st.sidebar.date_input("Data final", value=today, key=f"end_{titulo}")
-
-        start_dt = pd.to_datetime(start_date)
-        end_dt = pd.to_datetime(end_date) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+        inicio = st.sidebar.date_input("Data inicial", value=hoje, key=f"start_{key_prefix}")
+        fim = st.sidebar.date_input("Data final", value=hoje, key=f"end_{key_prefix}")
+        start_dt = pd.to_datetime(inicio)
+        end_dt = pd.to_datetime(fim)
         mask = (df["Data da venda"] >= start_dt) & (df["Data da venda"] <= end_dt)
-        filtro_descr = f"{start_dt.strftime('%d/%m/%y')} → {end_dt.strftime('%d/%m/%y')}"
+        desc = f"{inicio.strftime('%d/%m/%Y')} → {fim.strftime('%d/%m/%Y')}"
 
     elif modo == "Mensal":
-        st.sidebar.header(f"Filtro Mensal — {titulo}" if titulo else "Filtro Mensal")
-        labels, label_map = preparar_periodos(df)
-        selecionados = st.sidebar.multiselect("Selecione os meses:", options=labels, default=labels)
-        sel_periods = [p for p, lbl in label_map.items() if lbl in selecionados]
-        mask = df["period"].isin(sel_periods)
-        filtro_descr = ", ".join(selecionados)
+        mes_ano = st.sidebar.selectbox(
+            "Selecione o mês",
+            options=sorted(df["Data da venda"].dt.to_period("M").unique(), reverse=True),
+            format_func=lambda p: p.strftime("%B/%Y"),
+            key=f"mensal_{key_prefix}"
+        )
+        mask = df["Data da venda"].dt.to_period("M") == mes_ano
+        desc = mes_ano.strftime("%B/%Y")
 
-    elif modo == "Últimos 15 dias":
-        today = datetime.today()
-        start15 = today - timedelta(days=15)
-        mask = (df["Data da venda"] >= start15) & (df["Data da venda"] <= today)
-        filtro_descr = f"Últimos 15 dias ({start15.strftime('%d/%m/%y')} – {today.strftime('%d/%m/%y')})"
+    else:  # Últimos 15 dias
+        end_dt = pd.to_datetime(datetime.now().date())
+        start_dt = end_dt - timedelta(days=15)
+        mask = (df["Data da venda"] >= start_dt) & (df["Data da venda"] <= end_dt)
+        desc = f"Últimos 15 dias ({start_dt.strftime('%d/%m')} – {end_dt.strftime('%d/%m')})"
 
-    return mask, filtro_descr
-
-
-def gerar_tabela_previsao(df, df_resumo):
-    """Gera tabela de previsão de vendas (7 e 15 dias)."""
-    today = pd.to_datetime("today").normalize()
-
-    df15 = df_resumo[["Produto", "Quantidade"]].rename(columns={"Quantidade": "Quantidade 15 dias"})
-
-    start7 = today - pd.Timedelta(days=7)
-    mask7 = (df["Data da venda"] >= start7) & (df["Data da venda"] <= today)
-    df7 = df[mask7]
-    df7_sum = (
-        df7.groupby("Produto", as_index=False)
-        .agg({"Quantidade": "sum"})
-        .rename(columns={"Quantidade": "Quantidade 7 dias"})
-    )
-
-    df_prev = pd.merge(df15, df7_sum, on="Produto", how="outer").fillna(0)
-    df_prev["Quantidade 15 dias"] = df_prev["Quantidade 15 dias"].astype(int)
-    df_prev["Quantidade 7 dias"] = df_prev["Quantidade 7 dias"].astype(int)
-    df_prev["Estimativa 30 dias (base 7)"] = (df_prev["Quantidade 7 dias"] / 7 * 30).round().astype(int)
-    df_prev["Estimativa 30 dias (base 15)"] = (df_prev["Quantidade 15 dias"] / 15 * 30).round().astype(int)
-    df_prev = df_prev.sort_values("Quantidade 15 dias", ascending=False)
-
-    st.subheader("📈 Previsão de Vendas — 7 e 15 dias")
-    st.dataframe(df_prev, use_container_width=True)
+    return mask, desc
 
 
-def gerar_curva_abc(df_resumo):
-    """Gera gráfico de Curva ABC Top 15."""
-    top15 = df_resumo.head(15).copy()
-    top15["Acumulado"] = top15["Valor total"].cumsum()
-    total15 = top15["Valor total"].sum()
-    top15["% Acumulado"] = (top15["Acumulado"] / total15 * 100).round(2)
-    top15["Produto"] = pd.Categorical(
-        top15["Produto"], categories=top15["Produto"].tolist(), ordered=True
-    )
-    fig = px.line(
-        top15, x="Produto", y="% Acumulado", markers=True,
-        title="Curva ABC (Top 15 Produtos)",
-        category_orders={"Produto": top15["Produto"].tolist()}
-    )
-    fig.update_layout(xaxis_tickangle=-45)
-    st.plotly_chart(fig, use_container_width=True)
+def gerar_previsao_30d(dff):
+    """Gera tabela de previsão com base nos últimos 15 e 7 dias."""
+    hoje = datetime.now()
+    start_15d = hoje - timedelta(days=15)
+    start_7d = hoje - timedelta(days=7)
+
+    df_15 = dff[dff["Data da venda"] >= start_15d].groupby("Produto", as_index=False).agg({"Quantidade": "sum"})
+    df_15.rename(columns={"Quantidade": "Qtd 15d"}, inplace=True)
+
+    df_7 = dff[dff["Data da venda"] >= start_7d].groupby("Produto", as_index=False).agg({"Quantidade": "sum"})
+    df_7.rename(columns={"Quantidade": "Qtd 7d"}, inplace=True)
+
+    prev = pd.merge(df_15, df_7, on="Produto", how="outer").fillna(0)
+    prev["Est30d_15d"] = (prev["Qtd 15d"] / 15 * 30).round().astype(int)
+    prev["Est30d_7d"] = (prev["Qtd 7d"] / 7 * 30).round().astype(int)
+
+    st.subheader("📈 Previsão de Vendas para 30 dias (baseada em 7 e 15 dias)")
+    st.dataframe(prev.sort_values("Est30d_15d", ascending=False), use_container_width=True)
 
 
 def render_dashboard(titulo, json_path):
+    """Renderiza dashboard com filtros Diário, Mensal e Últimos 15 dias + previsão."""
+    if not os.path.exists(json_path):
+        st.error(f"Arquivo não encontrado: {json_path}")
+        return
+
     st.subheader(titulo)
 
     try:
@@ -105,48 +78,43 @@ def render_dashboard(titulo, json_path):
         return
 
     if df.empty:
-        st.warning("Nenhuma venda encontrada no JSON.")
+        st.warning("Nenhuma venda encontrada.")
         return
 
-    # --- Filtro de Período ---
-    st.sidebar.header(f"📅 Selecione o Período — {titulo}")
-    modo = st.sidebar.radio("Filtrar por:", ["Diário", "Mensal", "Últimos 15 dias"], key=f"modo_{titulo}")
+    # Convertendo datas
+    if "Data da venda" not in df.columns:
+        st.error("Coluna 'Data da venda' não encontrada.")
+        return
 
-    mask, filtro_descr = aplicar_filtro(df, modo, titulo)
+    df["Data da venda"] = pd.to_datetime(df["Data da venda"], errors="coerce")
+
+    modo = st.sidebar.radio(
+        f"Filtro — {titulo}",
+        ["Diário", "Mensal", "Últimos 15 dias"],
+        key=f"modo_{titulo}"
+    )
+
+    mask, desc = aplicar_filtro(df, modo, key_prefix=titulo)
     dff = df[mask]
 
     if dff.empty:
-        st.warning("Nenhuma venda encontrada para o período selecionado.")
+        st.warning("Sem vendas no período.")
         return
 
-    # --- Resumo ---
-    df_resumo = (
-        dff.groupby("Produto", as_index=False)
-        .agg({"Quantidade": "sum", "Valor total": "sum"})
-        .sort_values("Valor total", ascending=False)
-    )
+    resumo = dff.groupby("Produto", as_index=False).agg({
+        "Quantidade": "sum",
+        "Valor total": "sum"
+    }).sort_values("Valor total", ascending=False)
 
     total_qt = int(dff["Quantidade"].sum())
     total_vl = dff["Valor total"].sum()
-    col1, col2 = st.columns(2)
-    col1.metric("Itens vendidos", total_qt)
-    col2.metric(
-        "Faturamento (R$)",
-        f"R$ {total_vl:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    )
 
-    st.subheader(f"Período ➔ {filtro_descr}")
+    c1, c2 = st.columns(2)
+    c1.metric("Itens vendidos", total_qt)
+    c2.metric("Faturamento (R$)", f"R$ {total_vl:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
 
-    # --- Tabela ---
-    df_display = df_resumo.copy()
-    df_display["Valor total"] = df_display["Valor total"].apply(
-        lambda x: f"R$ {x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    )
-    st.dataframe(df_display, use_container_width=True)
+    st.subheader(f"Período: {desc}")
+    st.dataframe(resumo, use_container_width=True)
 
-    # --- Tabela de previsão para Últimos 15 dias ---
     if modo == "Últimos 15 dias":
-        gerar_tabela_previsao(dff, df_resumo)
-
-    # --- Curva ABC ---
-    gerar_curva_abc(df_resumo)
+        gerar_previsao_30d(dff)

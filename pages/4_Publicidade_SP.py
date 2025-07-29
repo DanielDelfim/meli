@@ -1,4 +1,4 @@
-from dashboard.sp_dashboard_publicidade import render_sp_publicidade
+from dashboard.dashboard_publicidade import render_publicidade
 
 # Call the main function
-render_sp_publicidade()
+render_publicidade("SP")

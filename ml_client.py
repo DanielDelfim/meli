@@ -11,8 +11,9 @@ token_dir.mkdir(exist_ok=True)
 LAST_UPDATE_FILE = token_dir / "last_update.json"
 
 
+# ---------------- CONFIGURAÇÕES ----------------
 def load_config(loja: str) -> dict:
-    prefix = loja.upper()  # “SP” ou “MG”
+    prefix = loja.upper()  # "SP" ou "MG"
 
     json_path = os.getenv(f"{prefix}_JSON_PATH")
     if not json_path:
@@ -27,6 +28,7 @@ def load_config(loja: str) -> dict:
     }
 
 
+# ---------------- TOKEN ----------------
 def get_valid_token(store: str) -> str:
     """
     Retorna um token válido para a loja, fazendo refresh se necessário.
@@ -35,7 +37,6 @@ def get_valid_token(store: str) -> str:
     path = token_dir / f"{store}.json"
 
     if not path.exists():
-        # Tenta bootstrap via ENV
         env_key = f"{store}_TOKEN_JSON"
         raw = os.getenv(env_key)
         if not raw:
@@ -46,16 +47,15 @@ def get_valid_token(store: str) -> str:
             token = json.loads(raw)
         except json.JSONDecodeError:
             raise ValueError(f"Conteúdo de {env_key} não é JSON válido.")
-        # assegura obtido_at
+
         if "_obtained_at" not in token:
             token["_obtained_at"] = int(time.time())
-        # salva para uso futuro
+
         with open(path, "w", encoding="utf-8") as f:
             json.dump(token, f, ensure_ascii=False, indent=2)
     else:
         token = json.load(open(path, encoding="utf-8"))
 
-    # Refresh se próximo de expirar
     if time.time() > token.get("_obtained_at", 0) + token.get("expires_in", 0) - 60:
         token = refresh_token(store)
     return token["access_token"]
@@ -83,36 +83,103 @@ def refresh_token(store: str) -> dict:
     return token_data
 
 
-def fetch_orders_incremental(store: str, seller_id: int, status: str = "paid") -> list:
+# ---------------- ORDERS ----------------
+def fetch_all_orders(store: str, seller_id: int, status="paid") -> list:
+    """
+    Busca TODAS as vendas de uma loja (paginando até o fim).
+    """
     token = get_valid_token(store)
     headers = {"Authorization": f"Bearer {token}"}
     url = "https://api.mercadolibre.com/orders/search"
 
-    last_update = None
-    if LAST_UPDATE_FILE.exists():
-        data = json.load(open(LAST_UPDATE_FILE, encoding="utf-8"))
-        last_update = data.get(store)
+    params = {
+        "seller": seller_id,
+        "status": status,
+        "limit": 50,
+        "offset": 0,
+        "sort": "date_asc"  # ordem cronológica
+    }
 
-    params = {"seller": seller_id, "status": status, "limit": 50, "offset": 0}
-    if last_update:
-        params["order.date_created.from"] = last_update
+    all_orders = []
+    total = 0
+    while True:
+        resp = requests.get(url, headers=headers, params=params)
+        resp.raise_for_status()
+        data = resp.json()
+        batch = data.get("results", [])
+        if not batch:
+            break
+        all_orders.extend(batch)
+        total += len(batch)
+        print(f"[INFO] {store}: {total} pedidos coletados...")
+        params["offset"] += 50
+        if len(batch) < 50:
+            break
+
+    return all_orders
+
+
+def save_all_orders(store: str, seller_id: int, path: str) -> int:
+    """
+    Busca todas as vendas e salva em um único JSON (sobrescrevendo o arquivo).
+    """
+    todos = fetch_all_orders(store, seller_id)
+    if not todos:
+        print(f"[INFO] Nenhum pedido encontrado para {store}.")
+        return 0
+
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(todos, f, ensure_ascii=False, indent=2)
+
+    print(f"[INFO] {len(todos)} pedidos salvos em {path}")
+    return len(todos)
+
+
+# ---------------- INCREMENTAL (MANTIDO) ----------------
+def fetch_orders_incremental(store: str, seller_id: int, start_date=None, end_date=None, status="paid") -> list:
+    """
+    Busca pedidos no intervalo definido.
+    """
+    token = get_valid_token(store)
+    headers = {"Authorization": f"Bearer {token}"}
+    url = "https://api.mercadolibre.com/orders/search"
+
+    params = {
+        "seller": seller_id,
+        "status": status,
+        "limit": 50,
+        "offset": 0,
+        "sort": "date_desc"
+    }
+
+    if start_date and end_date:
+        params["order.date_created.from"] = start_date
+        params["order.date_created.to"] = end_date
 
     all_orders = []
     while True:
         resp = requests.get(url, headers=headers, params=params)
         resp.raise_for_status()
-        batch = resp.json().get("results", [])
+        data = resp.json()
+        batch = data.get("results", [])
         if not batch:
             break
         all_orders.extend(batch)
         params["offset"] += 50
+        if len(batch) < 50:
+            break
 
     return all_orders
 
 
-def save_orders_incremental(store: str, seller_id: int, path: str) -> int:
-    novos = fetch_orders_incremental(store, seller_id)
+def save_orders_incremental(store: str, seller_id: int, path: str, start_date=None, end_date=None) -> int:
+    """
+    Salva pedidos incrementais no arquivo JSON.
+    """
+    novos = fetch_orders_incremental(store, seller_id, start_date, end_date)
     if not novos:
+        print(f"[INFO] Nenhum pedido novo para {store}.")
         return 0
 
     try:
@@ -125,13 +192,9 @@ def save_orders_incremental(store: str, seller_id: int, path: str) -> int:
     filtrados = [p for p in novos if p["id"] not in ids_existentes]
     atualizados = existentes + filtrados
 
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(atualizados, f, ensure_ascii=False, indent=2)
 
-    agora = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-    data = json.load(open(LAST_UPDATE_FILE, encoding="utf-8")) if LAST_UPDATE_FILE.exists() else {}
-    data[store] = agora
-    with open(LAST_UPDATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
+    print(f"[INFO] {len(filtrados)} novos pedidos adicionados para {store}.")
     return len(filtrados)
