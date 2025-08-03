@@ -16,8 +16,8 @@ INPUT_FILES = {
 
 # Arquivos de saída pré-processados
 OUTPUT_FILES = {
-    "SP": DESIGNER_PATH / "backup_vendas_sp_pp.json",
-    "MG": DESIGNER_PATH / "backup_vendas_mg_pp.json"
+    "SP": BASE_PATH / "tokens" / "vendas" / "backup_vendas_sp_pp.json",
+    "MG": BASE_PATH / "tokens" / "vendas" / "backup_vendas_mg_pp.json"
 }
 
 def preprocess_json(input_path, output_path, uf):
@@ -49,10 +49,11 @@ def preprocess_json(input_path, output_path, uf):
                         registros.append({
                             "Data da venda": data_venda,
                             "Produto": item.get("item", {}).get("title", "Produto não identificado"),
-                            "SKU": item.get("item", {}).get("seller_sku", ""),  # Inclui SKU
+                            "SKU": item.get("item", {}).get("seller_sku", ""),
                             "Quantidade": item.get("quantity", 0),
                             "Valor total": round(item.get("unit_price", 0) * item.get("quantity", 0), 2),
-                            "codigo_do_anuncio": item.get("item", {}).get("id", "")
+                            "codigo_do_anuncio": item.get("item", {}).get("id", ""),
+                            "Unidade": uf
                         })
                 else:
                     registros.append({
@@ -61,7 +62,8 @@ def preprocess_json(input_path, output_path, uf):
                         "SKU": "",
                         "Quantidade": 1,
                         "Valor total": record.get("total_amount", 0),
-                        "codigo_do_anuncio": ""
+                        "codigo_do_anuncio": "",
+                        "Unidade": uf
                     })
 
         # Salva o arquivo processado
@@ -70,7 +72,6 @@ def preprocess_json(input_path, output_path, uf):
 
         print(f"✅ {uf}: {len(registros)} registros processados e salvos em {output_path}")
 
-        # Resumo de vendas por dia
         if registros:
             df = pd.DataFrame(registros)
             resumo = df.groupby("Data da venda")["Quantidade"].sum()
@@ -82,7 +83,7 @@ def preprocess_json(input_path, output_path, uf):
             json.dump([], f, ensure_ascii=False, indent=2)
 
 def main():
-    print("🔄 Iniciando pré-processamento de vendas (com Produto, Quantidade, Valor total e SKU)...")
+    print("🔄 Iniciando pré-processamento de vendas...")
     print(f"📂 Pasta de trabalho: {DESIGNER_PATH}")
 
     DESIGNER_PATH.mkdir(exist_ok=True)

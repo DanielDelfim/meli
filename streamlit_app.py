@@ -2,10 +2,10 @@ import os
 import subprocess
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import date
 from pathlib import Path
 from dotenv import load_dotenv
-from utils.utils_dashboard import carregar_json_para_df
+from utils.utils_filtros import filtrar_vendas_json_por_periodo
 
 # ---------------- CONFIGURAÇÕES ----------------
 BASE_PATH = Path(__file__).resolve().parent
@@ -15,33 +15,11 @@ SCRIPTS_DIR = BASE_PATH / "scripts"
 UPDATE_ONCE_SCR = SCRIPTS_DIR / "update_once.py"
 PREPROCESS_SCR = SCRIPTS_DIR / "preprocess_dates.py"
 
-JSON_SP_PP = BASE_PATH / "Designer" / "backup_vendas_sp_pp.json"
-JSON_MG_PP = BASE_PATH / "Designer" / "backup_vendas_mg_pp.json"
+JSON_SP = BASE_PATH / "tokens" / "vendas" / "backup_vendas_sp_pp.json"
+JSON_MG = BASE_PATH / "tokens" / "vendas" / "backup_vendas_mg_pp.json"
 
-# ---------------- FUNÇÕES AUXILIARES ----------------
-@st.cache_data
-def carregar_dados():
-    """Carrega os arquivos pré-processados com as datas normalizadas."""
-    df_sp = carregar_json_para_df(JSON_SP_PP) if JSON_SP_PP.exists() else pd.DataFrame()
-    df_mg = carregar_json_para_df(JSON_MG_PP) if JSON_MG_PP.exists() else pd.DataFrame()
-
-    if not df_sp.empty and "Data da venda" in df_sp.columns:
-        df_sp["Data da venda"] = pd.to_datetime(df_sp["Data da venda"], format="%Y-%m-%d")
-    if not df_mg.empty and "Data da venda" in df_mg.columns:
-        df_mg["Data da venda"] = pd.to_datetime(df_mg["Data da venda"], format="%Y-%m-%d")
-
-    return df_sp, df_mg
-
-
-def filtrar_periodo(df, inicio, fim):
-    """Filtra vendas no intervalo [inicio, fim]."""
-    if df.empty:
-        return df
-    return df[(df["Data da venda"] >= inicio) & (df["Data da venda"] <= fim)]
-
-
+# ---------------- FUNÇÃO DE ATUALIZAÇÃO ----------------
 def atualizar_dados():
-    """Executa update_once.py e preprocess_dates.py."""
     try:
         with st.spinner("🔄 Atualizando dados, aguarde..."):
             subprocess.run(["python", str(UPDATE_ONCE_SCR)], check=True)
@@ -54,41 +32,28 @@ def atualizar_dados():
     except Exception as e:
         st.error(f"❌ Erro inesperado: {e}")
 
-
 # ---------------- LAYOUT ----------------
 st.set_page_config(page_title="Dashboard de Vendas", layout="wide")
 st.title("📊 Dashboard de Vendas — Mercado Livre")
 
-# Botão de atualização
 if st.button("🔄 Atualizar Dados Agora", key="btn_atualizar"):
     atualizar_dados()
 
-# Carrega dados
-df_sp, df_mg = carregar_dados()
-if df_sp.empty and df_mg.empty:
-    st.warning("⚠️ Nenhum dado encontrado. Clique em 'Atualizar Dados Agora'.")
-    st.stop()
-
-# ---------------- FILTRO LATERAL (DIÁRIO) ----------------
-st.sidebar.header("Filtro por Período")
-today = datetime.now().date()
-
+# ---------------- FILTRO DIÁRIO ----------------
+st.sidebar.header("Filtro por Data")
+today = date.today()
 start_date = st.sidebar.date_input("Data inicial", value=today, key="start_date")
 end_date = st.sidebar.date_input("Data final", value=today, key="end_date")
 
-start_dt = pd.to_datetime(f"{start_date}")
-end_dt = pd.to_datetime(f"{end_date}")
+# ---------------- FILTRAR VENDAS ----------------
+df_sp_periodo = filtrar_vendas_json_por_periodo(str(JSON_SP), start_date, end_date, unidade="SP")
+df_mg_periodo = filtrar_vendas_json_por_periodo(str(JSON_MG), start_date, end_date, unidade="MG")
 
-# Filtra dados
-df_sp_periodo = filtrar_periodo(df_sp, start_dt, end_dt)
-df_mg_periodo = filtrar_periodo(df_mg, start_dt, end_dt)
-
-# ---------------- CARDS DE FATURAMENTO ----------------
-fat_sp = df_sp_periodo["Valor total"].sum() if not df_sp_periodo.empty else 0
-fat_mg = df_mg_periodo["Valor total"].sum() if not df_mg_periodo.empty else 0
+# ---------------- CARDS ----------------
+fat_sp = df_sp_periodo.get("Valor total", pd.Series(dtype=float)).sum()
+fat_mg = df_mg_periodo.get("Valor total", pd.Series(dtype=float)).sum()
 fat_total = fat_sp + fat_mg
-
-qt_itens = int(df_sp_periodo["Quantidade"].sum() + df_mg_periodo["Quantidade"].sum())
+qt_itens = int(df_sp_periodo.get("Quantidade", pd.Series(dtype=float)).sum() + df_mg_periodo.get("Quantidade", pd.Series(dtype=float)).sum())
 qt_pedidos = len(df_sp_periodo) + len(df_mg_periodo)
 
 st.markdown(f"## Resumo de {start_date.strftime('%d/%m/%Y')} até {end_date.strftime('%d/%m/%Y')}")

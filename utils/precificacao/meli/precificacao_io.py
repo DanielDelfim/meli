@@ -3,7 +3,7 @@ import pandas as pd
 from pathlib import Path
 
 # Caminho para o arquivo de precificação
-BASE_PATH = Path(__file__).resolve().parent.parent
+BASE_PATH = Path(__file__).resolve().parents[3]
 PRECIFICACAO_JSON = BASE_PATH / "tokens" / "precificacao_meli.json"
 
 def carregar_dados() -> pd.DataFrame:
@@ -19,11 +19,13 @@ def carregar_dados() -> pd.DataFrame:
 
     return pd.DataFrame(data)
 
-def salvar_dados(df: pd.DataFrame):
-    """Salva o DataFrame atualizado no JSON."""
+def salvar_dados(df: pd.DataFrame) -> bool:
+    """Salva o DataFrame atualizado no JSON, convertendo NaN para null."""
+    # Substitui todos os NaN por None para gerar null no JSON
+    df_clean = df.where(pd.notnull(df), None)
     try:
         with open(PRECIFICACAO_JSON, "w", encoding="utf-8") as f:
-            json.dump(df.to_dict(orient="records"), f, ensure_ascii=False, indent=2)
+            json.dump(df_clean.to_dict(orient="records"), f, ensure_ascii=False, indent=2)
         return True
     except Exception:
         return False
