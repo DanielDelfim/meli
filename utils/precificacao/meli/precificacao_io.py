@@ -3,8 +3,8 @@ import pandas as pd
 from pathlib import Path
 
 # Caminho para o arquivo de precificação
-BASE_PATH = Path(__file__).resolve().parents[3]
-PRECIFICACAO_JSON = BASE_PATH / "tokens" / "precificacao_meli.json"
+PRECIFICACAO_JSON = Path("C:/Users/dmdel/OneDrive/Aplicativos/tokens/precificacao_meli.json")
+
 
 def carregar_dados() -> pd.DataFrame:
     """Carrega os dados de precificação do JSON."""
@@ -20,15 +20,25 @@ def carregar_dados() -> pd.DataFrame:
     return pd.DataFrame(data)
 
 def salvar_dados(df: pd.DataFrame) -> bool:
-    """Salva o DataFrame atualizado no JSON, convertendo NaN para null."""
-    # Substitui todos os NaN por None para gerar null no JSON
+    """Salva o DataFrame atualizado no JSON, convertendo NaN para null e Timestamps para string."""
     df_clean = df.where(pd.notnull(df), None)
+
+    # Converte colunas com Timestamp para string
+    for col in df_clean.columns:
+        if pd.api.types.is_datetime64_any_dtype(df_clean[col]):
+            df_clean[col] = df_clean[col].astype(str)
+        else:
+            # Verifica valores individuais que ainda podem ser Timestamp
+            df_clean[col] = df_clean[col].apply(lambda x: str(x) if isinstance(x, pd.Timestamp) else x)
+
     try:
         with open(PRECIFICACAO_JSON, "w", encoding="utf-8") as f:
             json.dump(df_clean.to_dict(orient="records"), f, ensure_ascii=False, indent=2)
         return True
-    except Exception:
+    except Exception as e:
+        print(f"[ERRO] Falha ao salvar JSON: {e}")
         return False
+
 
 def salvar_alteracoes_json(id_produto: int, edits: dict) -> bool:
     """Atualiza um produto específico pelo ID."""

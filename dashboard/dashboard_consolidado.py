@@ -1,8 +1,7 @@
 import os
 import streamlit as st
 import pandas as pd
-import json
-from datetime import datetime, date
+from datetime import datetime
 from pathlib import Path
 from utils.utils_filtros import filtrar_vendas_json_por_periodo
 
@@ -11,91 +10,66 @@ BASE = Path(os.getenv("BASE_PATH", "C:/Users/dmdel/OneDrive/Aplicativos"))
 CUSTOS_PATH = BASE / "Designer" / "custos.json"
 VENDAS_SP_JSON = BASE / "tokens" / "vendas" / "backup_vendas_sp_pp.json"
 VENDAS_MG_JSON = BASE / "tokens" / "vendas" / "backup_vendas_mg_pp.json"
-PREC_PATH = BASE / "tokens" / "precificacao_meli.json"
-
 
 def render_consolidado_financeiro():
-    st.set_page_config(page_title="Consolidado Financeiro", layout="wide")
-    st.title("8. Consolidado Financeiro (MCP Ponderado por Vendas)")
+    st.set_page_config(page_title="Receita Consolidada", layout="wide")
+    st.title("📊 Receita Consolidada por Mês")
 
-    # Seleção do período
+    # Carrega custos e períodos
     df_custos = pd.read_json(CUSTOS_PATH)
     df_custos['period'] = pd.to_datetime(df_custos['mes_competencia'], format="%m/%Y").dt.to_period('M')
     periods = sorted(df_custos['period'].unique())
     labels = [p.strftime("%m/%Y") for p in periods]
-    sel = st.selectbox("Mês de Competência", labels)
+
+    sel = st.selectbox("🗓️ Mês de Competência", labels)
     period = periods[labels.index(sel)]
     start_date = period.start_time.date()
     end_date = period.end_time.date()
 
-    # Extrair custos e datas de publicidade
-    record = df_custos[df_custos['period'] == period].iloc[0]
-    custo_total = record.get('custo_total', 0)
-    pub = record.get('publicidade', {})
-    if not isinstance(pub, dict):
-       pub = {}
+    st.caption(f"📅 Período: {start_date.strftime('%d/%m/%Y')} a {end_date.strftime('%d/%m/%Y')}")
 
-    ads_sp = pub.get('valor_ads_sp', 0)
-    ads_mg = pub.get('valor_ads_mg', 0)
-    data_abertura_sp = pub.get('data_abertura_sp', '')
-    data_fechamento_sp = pub.get('data_fechamento_sp', '')
-    data_abertura_mg = pub.get('data_abertura_mg', '')
-    data_fechamento_mg = pub.get('data_fechamento_mg', '')
+    # Filtra vendas
+    df_sp = filtrar_vendas_json_por_periodo(str(VENDAS_SP_JSON), start_date, end_date, unidade="SP")
+    df_mg = filtrar_vendas_json_por_periodo(str(VENDAS_MG_JSON), start_date, end_date, unidade="MG")
+    receita_sp = df_sp["Valor total"].sum()
+    receita_mg = df_mg["Valor total"].sum()
 
+    # Busca custos e MCP do mês
+    record = df_custos[df_custos['period'] == period]
+    if not record.empty:
+        dados_mes = record.iloc[0].to_dict()
+        custo_total = float(dados_mes.get("custo_total", 0.0))
+        pub_raw = dados_mes.get("publicidade", {})
+        pub = pub_raw if isinstance(pub_raw, dict) else {}
 
-    # Carregar vendas com filtro centralizado
-    df_sp_period = filtrar_vendas_json_por_periodo(str(VENDAS_SP_JSON), start_date, end_date, unidade="SP")
-    df_mg_period = filtrar_vendas_json_por_periodo(str(VENDAS_MG_JSON), start_date, end_date, unidade="MG")
+        mcp_sp = float(pub.get("mcp_sp", 0.0))
+        mcp_mg = float(pub.get("mcp_mg", 0.0))
 
-    # Calcular MCP ponderado
-    df_prec = pd.read_json(PREC_PATH)
-    df_prec['SKU'] = df_prec['SKU'].astype(str)
-    df_prec['% Margem'] = df_prec['% Margem de contribuição'].astype(float)
+    else:
+        custo_total = 0.0
+        mcp_sp = 0.0
+        mcp_mg = 0.0
 
-    sales_sp = df_sp_period.groupby('SKU', as_index=False)['Valor total'].sum().rename(columns={'Valor total': 'vendas'})
-    sales_mg = df_mg_period.groupby('SKU', as_index=False)['Valor total'].sum().rename(columns={'Valor total': 'vendas'})
+    # Calcular margens em R$
+    margem_contribuicao_sp = receita_sp * (mcp_sp / 100)
+    margem_contribuicao_mg = receita_mg * (mcp_mg / 100)
+    margem_total = margem_contribuicao_sp + margem_contribuicao_mg
 
-    prec_sp = df_prec[df_prec['CD Mercado Livre'] == 'Araçariguama'][['SKU', '% Margem']]
-    prec_mg = df_prec[df_prec['CD Mercado Livre'] == 'Betim'][['SKU', '% Margem']]
-    avg_marg_sp = prec_sp['% Margem'].mean() if not prec_sp.empty else 0.0
-    avg_marg_mg = prec_mg['% Margem'].mean() if not prec_mg.empty else 0.0
+    # Lucro ou prejuízo
+    lucro_prejuizo = margem_total - custo_total
 
-    merged_sp = sales_sp.merge(prec_sp, on='SKU', how='left')
-    merged_mg = sales_mg.merge(prec_mg, on='SKU', how='left')
-    merged_sp['% Margem'].fillna(avg_marg_sp, inplace=True)
-    merged_mg['% Margem'].fillna(avg_marg_mg, inplace=True)
+    # Layout compacto
+    st.markdown("### 🔢 Receita e MCP (%)")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Receita SP", f"R$ {receita_sp:,.2f}")
+    col2.metric("Receita MG", f"R$ {receita_mg:,.2f}")
+    col3.metric("MCP SP", f"{mcp_sp:.2f}%")
+    col4.metric("MCP MG", f"{mcp_mg:.2f}%")
 
-    tot_rev_sp = merged_sp['vendas'].sum()
-    tot_rev_mg = merged_mg['vendas'].sum()
-    mcp_sp = (merged_sp['vendas'] * merged_sp['% Margem']).sum() / tot_rev_sp if tot_rev_sp > 0 else 0.0
-    mcp_mg = (merged_mg['vendas'] * merged_mg['% Margem']).sum() / tot_rev_mg if tot_rev_mg > 0 else 0.0
-    margin_sp = tot_rev_sp * mcp_sp
-    margin_mg = tot_rev_mg * mcp_mg
+    st.markdown("### 💰 Margens e Custo")
+    col5, col6 = st.columns(2)
+    col5.metric("Margem Total (SP + MG)", f"R$ {margem_total:,.2f}")
+    col6.metric("Custo Total", f"R$ {custo_total:,.2f}")
 
-    # KPIs principais
-    st.markdown("---")
-    k1, k2, k3 = st.columns(3)
-    k1.metric("Receita SP (R$)", f"R$ {tot_rev_sp:,.2f}")
-    k2.metric("MCP SP (%)", f"{mcp_sp*100:.2f}%")
-    k3.metric("Margem SP (R$)", f"R$ {margin_sp:,.2f}")
-    k4, k5, k6 = st.columns(3)
-    k4.metric("Receita MG (R$)", f"R$ {tot_rev_mg:,.2f}")
-    k5.metric("MCP MG (%)", f"{mcp_mg*100:.2f}%")
-    k6.metric("Margem MG (R$)", f"R$ {margin_mg:,.2f}")
-
-    # Custo, soma de margens e lucro/prejuízo
-    st.markdown("---")
-    f1, f2, f3 = st.columns(3)
-    total_margin = margin_sp + margin_mg
-    profit_loss = total_margin - custo_total
-    f1.metric("Custo Total (R$)", f"R$ {custo_total:,.2f}")
-    f2.metric("Total Margem (SP+MG) (R$)", f"R$ {total_margin:,.2f}")
-    f3.metric("Lucro/Prejuízo (R$)", f"R$ {profit_loss:,.2f}")
-
-    # Publicidade SP e MG (mantida igual)
-    # ✅ Aqui você pode manter a lógica já existente para calcular TACOS
-
-    # Debug SKUs (sem alterações necessárias)
-
-if __name__ == '__main__':
-    render_consolidado_financeiro()
+    st.markdown("### 🧾 Resultado Final")
+    st.metric("Lucro / Prejuízo", f"R$ {lucro_prejuizo:,.2f}")

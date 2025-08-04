@@ -53,9 +53,31 @@ def render_publicidade(region_key: str):
     ads15 = filtrar(df_ads15)
     ads30 = filtrar(df_ads30)
 
-    vendas7 = df_vendas_geral[df_vendas_geral["codigo_do_anuncio"].isin(ads7["codigo_do_anuncio"])]
-    vendas15 = df_vendas_geral[df_vendas_geral["codigo_do_anuncio"].isin(ads15["codigo_do_anuncio"])]
-    vendas30 = df_vendas_geral[df_vendas_geral["codigo_do_anuncio"].isin(ads30["codigo_do_anuncio"])]
+    # Filtro por período com base nas datas reais dos anúncios
+    vendas7 = filtrar_vendas_json_por_periodo(
+    caminho_json=str(DESIGNER_PATH / cfg["vendas"]),
+    data_inicio=ads7["desde"].min().date(),
+    data_fim=ads7["ate"].max().date(),
+    unidade=region_key
+)
+    vendas7 = vendas7[vendas7["codigo_do_anuncio"].isin(ads7["codigo_do_anuncio"])]
+
+    vendas15 = filtrar_vendas_json_por_periodo(
+    caminho_json=str(DESIGNER_PATH / cfg["vendas"]),
+    data_inicio=ads15["desde"].min().date(),
+    data_fim=ads15["ate"].max().date(),
+    unidade=region_key
+)
+    vendas15 = vendas15[vendas15["codigo_do_anuncio"].isin(ads15["codigo_do_anuncio"])]
+
+    vendas30 = filtrar_vendas_json_por_periodo(
+    caminho_json=str(DESIGNER_PATH / cfg["vendas"]),
+    data_inicio=ads30["desde"].min().date(),
+    data_fim=ads30["ate"].max().date(),
+    unidade=region_key
+)
+    vendas30 = vendas30[vendas30["codigo_do_anuncio"].isin(ads30["codigo_do_anuncio"])]
+
 
     exibir_expander_vendas(vendas30)
     exibir_expander_fora_ads(df_vendas_geral, df_ads_geral)

@@ -151,6 +151,7 @@ def render_custos_dashboard():
             st.metric("TACoS MG", f"{met_mg['TACoS (%)']:.2f}%")
             st.metric("Receita MG", f"R$ {met_mg['Investimento']:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
 
+        # Seletor de mês e edição dos valores
         mes_pub = st.selectbox("Selecione o mês de competência:", meses)
         dados_mes = obter_mes(mes_pub) or {}
         pub = dados_mes.get("publicidade", {})
@@ -160,19 +161,45 @@ def render_custos_dashboard():
         col1, col2 = st.columns(2)
         with col1:
             valor_ads_sp = st.number_input("Ads SP (R$):", value=float(pub.get("valor_ads_sp", 0.0)), step=0.01, disabled=not editar_pub)
+            tacos_sp = st.number_input("TACoS SP (%):", value=float(pub.get("tacos_sp", 0.0)), step=0.01, disabled=not editar_pub)
+            mcp_sp_manual = st.number_input("MCP SP (%):", value=float(pub.get("mcp_sp", 0.0)), step=0.01, disabled=not editar_pub)
+
         with col2:
             valor_ads_mg = st.number_input("Ads MG (R$):", value=float(pub.get("valor_ads_mg", 0.0)), step=0.01, disabled=not editar_pub)
+            tacos_mg = st.number_input("TACoS MG (%):", value=float(pub.get("tacos_mg", 0.0)), step=0.01, disabled=not editar_pub)
+            mcp_mg_manual = st.number_input("MCP MG (%):", value=float(pub.get("mcp_mg", 0.0)), step=0.01, disabled=not editar_pub)
 
-        total = valor_ads_sp + valor_ads_mg
-        st.metric("Investimento Total", f"R$ {total:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+            total = valor_ads_sp + valor_ads_mg
+            st.metric("Investimento Total", f"R$ {total:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
 
-        if editar_pub and st.button("📏 Salvar Publicidade"):
-            pub_atualizado = {
-                "valor_ads_sp": valor_ads_sp,
-                "valor_ads_mg": valor_ads_mg,
-                "valor_ads_total": total
-            }
-            dados_mes["publicidade"] = pub_atualizado
-            atualizar_custo_mes(mes_pub, dados_mes)
-            st.success("Publicidade salva com sucesso!")
-            st.rerun()
+            if editar_pub and st.button("📏 Salvar Publicidade"):
+                pub_atualizado = {
+                    "valor_ads_sp": valor_ads_sp,
+                    "valor_ads_mg": valor_ads_mg,
+                    "valor_ads_total": total,
+                    "tacos_sp": tacos_sp,
+                    "tacos_mg": tacos_mg,
+                    "mcp_sp": mcp_sp_manual,
+                    "mcp_mg": mcp_mg_manual
+    }
+
+                dados_mes["publicidade"] = pub_atualizado
+                atualizar_custo_mes(mes_pub, dados_mes)
+                st.success("Publicidade salva com sucesso!")
+                st.rerun()
+
+            # ---------------- MCP SP e MG ----------------
+        from utils.margem_contribuição_pond import calcular_margem_ponderada
+        PREC_PATH = Path("C:/Users/dmdel/OneDrive/Aplicativos/tokens/precificacao_meli.json")
+
+        if data_inicio_sp and data_fim_sp:
+            df_precos = pd.read_json(PREC_PATH)
+            mcp_sp = calcular_margem_ponderada(df_precos, str(VENDAS_SP), data_inicio_sp, data_fim_sp)
+            mcp_mg = calcular_margem_ponderada(df_precos, str(VENDAS_MG), data_inicio_mg, data_fim_mg)
+
+            st.markdown("---")
+            st.markdown("### 📈 Margem de Contribuição Ponderada (MCP)")
+            col_mcp1, col_mcp2 = st.columns(2)
+            col_mcp1.metric("MCP SP", f"{mcp_sp * 100:.2f}%")
+            col_mcp2.metric("MCP MG", f"{mcp_mg * 100:.2f}%")
+
