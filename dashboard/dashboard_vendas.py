@@ -72,3 +72,50 @@ def render_dashboard(titulo, json_sp=None, json_mg=None):
         st.dataframe(previsao, use_container_width=True)
     else:
         st.info("Sem dados suficientes para gerar previsão.")
+
+     # ---------------------- ESTOQUE MANUAL E ESTIMATIVAS ----------------------
+    if produto_selecionado:
+        st.subheader("📦 Estimativa de Estoque")
+
+        col1, col2 = st.columns(2)
+        estoque_atual = col1.number_input(
+            "Estoque atual (unidades)",
+            min_value=0,
+            step=1,
+            value=0,
+            key=f"estoque_atual_{produto_selecionado}"
+        )
+
+        dias_futuros = col2.number_input(
+            "Projeção em X dias",
+            min_value=1,
+            step=1,
+            value=30,
+            key=f"dias_futuros_{produto_selecionado}"
+        )
+
+        # Obter quantidade vendida nos últimos 7 dias
+        hoje = datetime.now().date()
+        data_7d = hoje - timedelta(days=7)
+        vendas_7d = dff[dff["Data da venda"] >= data_7d]["Quantidade"].sum()
+        media_diaria = vendas_7d / 7 if vendas_7d > 0 else 0
+
+        # Calcular dias até acabar o estoque
+        dias_estoque = math.floor(estoque_atual / media_diaria) if media_diaria > 0 else "∞"
+
+        # Calcular quanto teremos de estoque em X dias
+        consumo_previsto = math.floor(media_diaria * dias_futuros)
+        estoque_futuro = max(estoque_atual - consumo_previsto, 0)
+
+        # Estimativa de vendas em 30 dias com base nos últimos 7 dias
+        estimativa_30_dias = math.floor(media_diaria * 30)
+
+        # Cálculo da quantidade para reposição
+        reposicao = max(estimativa_30_dias - estoque_futuro, 0)
+
+        st.markdown("### 📊 Resultados")
+        col3, col4, col5 = st.columns(3)
+        col3.metric("Dias estimados até o fim do estoque", dias_estoque)
+        col4.metric(f"Estoque em {dias_futuros} dias", f"{estoque_futuro} un.")
+        col5.metric("Reposição necessária (para 30 dias)", f"{reposicao} un.")
+
