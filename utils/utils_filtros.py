@@ -36,5 +36,22 @@ def filtrar_vendas_json_por_periodo(
     df_filtrado["Quantidade"] = pd.to_numeric(df_filtrado.get("Quantidade", 0), errors="coerce").fillna(0).astype(int)
     df_filtrado["codigo_do_anuncio"] = df_filtrado.get("codigo_do_anuncio", "")
     df_filtrado["Produto"] = df_filtrado.get("Produto", "")
+    df_filtrado["SKU"] = df_filtrado.get("SKU", "").astype(str)
 
     return df_filtrado
+
+
+def quantidade_vendida_por_sku(df_vendas: pd.DataFrame) -> pd.DataFrame:
+    """
+    Retorna um DataFrame com a quantidade total vendida por SKU.
+    """
+    if "SKU" not in df_vendas.columns or "Quantidade" not in df_vendas.columns:
+        return pd.DataFrame()
+
+    return (
+        df_vendas.groupby("SKU")["Quantidade"]
+        .sum()
+        .reset_index()
+        .rename(columns={"Quantidade": "Qtd Vendida"})
+        .sort_values(by="Qtd Vendida", ascending=False)
+    )
