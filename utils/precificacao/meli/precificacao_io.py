@@ -1,78 +1,29 @@
-import json
 import pandas as pd
 from pathlib import Path
 
-# Caminho para o arquivo de precificação
-PRECIFICACAO_JSON = Path("C:/Users/dmdel/OneDrive/Aplicativos/tokens/precificacao_meli.json")
-
+CAMINHO_JSON = Path(r"C:/Users/dmdel/OneDrive/Aplicativos/tokens/precificacao/precificacao_meli.json")
 
 def carregar_dados() -> pd.DataFrame:
-    """Carrega os dados de precificação do JSON."""
-    if not PRECIFICACAO_JSON.exists():
-        return pd.DataFrame()
-
     try:
-        with open(PRECIFICACAO_JSON, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except json.JSONDecodeError:
-        return pd.DataFrame()
-
-    return pd.DataFrame(data)
-
-def salvar_dados(df: pd.DataFrame) -> bool:
-    """Salva o DataFrame atualizado no JSON, convertendo NaN para null e Timestamps para string."""
-    df_clean = df.where(pd.notnull(df), None)
-
-    # Converte colunas com Timestamp para string
-    for col in df_clean.columns:
-        if pd.api.types.is_datetime64_any_dtype(df_clean[col]):
-            df_clean[col] = df_clean[col].astype(str)
-        else:
-            # Verifica valores individuais que ainda podem ser Timestamp
-            df_clean[col] = df_clean[col].apply(lambda x: str(x) if isinstance(x, pd.Timestamp) else x)
-
-    try:
-        with open(PRECIFICACAO_JSON, "w", encoding="utf-8") as f:
-            json.dump(df_clean.to_dict(orient="records"), f, ensure_ascii=False, indent=2)
-        return True
+        df = pd.read_json(CAMINHO_JSON)
     except Exception as e:
-        print(f"[ERRO] Falha ao salvar JSON: {e}")
-        return False
+        raise RuntimeError(f"Erro ao carregar JSON: {e}")
+    return df
 
+def salvar_dados(df: pd.DataFrame):
+    try:
+        df.to_json(CAMINHO_JSON, orient="records", force_ascii=False, indent=2)
+    except Exception as e:
+        raise RuntimeError(f"Erro ao salvar JSON: {e}")
 
-def salvar_alteracoes_json(id_produto: int, edits: dict) -> bool:
-    """Atualiza um produto específico pelo ID."""
-    df = carregar_dados()
-    if df.empty or "ID" not in df.columns:
-        return False
+def atualizar_linha(df: pd.DataFrame, produto_id: int, novos_dados: dict) -> pd.DataFrame:
+    if produto_id in df["ID"].values:
+        for coluna, valor in novos_dados.items():
+            df.loc[df["ID"] == produto_id, coluna] = valor
+    return df
 
-    if id_produto not in df["ID"].values:
-        return False
+def deletar_produto(df: pd.DataFrame, produto_id: int) -> pd.DataFrame:
+    return df[df["ID"] != produto_id].reset_index(drop=True)
 
-    for key, value in edits.items():
-        df.loc[df["ID"] == id_produto, key] = value
-
-    return salvar_dados(df)
-
-def deletar_produto(id_produto: int) -> bool:
-    """Deleta um produto pelo ID."""
-    df = carregar_dados()
-    if df.empty or "ID" not in df.columns:
-        return False
-
-    df = df[df["ID"] != id_produto]
-    return salvar_dados(df)
-
-def adicionar_produto(produto: dict) -> bool:
-    """Adiciona um novo produto ao JSON."""
-    df = carregar_dados()
-
-    if df.empty:
-        df = pd.DataFrame([produto])
-    else:
-        if "ID" not in produto:
-            max_id = df["ID"].max() if not df["ID"].empty else 0
-            produto["ID"] = max_id + 1
-        df = pd.concat([df, pd.DataFrame([produto])], ignore_index=True)
-
-    return salvar_dados(df)
+def adicionar_produto(df: pd.DataFrame, dados_produto: dict) -> pd.DataFrame:
+    return pd.concat([df, pd.DataFrame([dados_produto])], ignore_index=True)
