@@ -55,3 +55,27 @@ def quantidade_vendida_por_sku(df_vendas: pd.DataFrame) -> pd.DataFrame:
         .rename(columns={"Quantidade": "Qtd Vendida"})
         .sort_values(by="Qtd Vendida", ascending=False)
     )
+
+def quantidade_vendida_por_sku(df_vendas: pd.DataFrame) -> pd.DataFrame:
+    """
+    Retorna um DataFrame com a quantidade total vendida por SKU.
+    """
+    if "SKU" not in df_vendas.columns or "Quantidade" not in df_vendas.columns:
+        return pd.DataFrame()
+
+    return (
+        df_vendas.groupby("SKU")["Quantidade"]
+        .sum()
+        .reset_index()
+        .rename(columns={"Quantidade": "Qtd Vendida"})
+        .sort_values(by="Qtd Vendida", ascending=False)
+    )
+
+def buscar_valor_por_prefixo(dicionario: dict, sku_prefixo: str) -> float:
+    """
+    Retorna o valor do primeiro SKU no dicionário que começa com o prefixo fornecido.
+    """
+    for sku, valor in dicionario.items():
+        if str(sku).startswith(str(sku_prefixo)):
+            return round(valor, 6)
+    return 0.0

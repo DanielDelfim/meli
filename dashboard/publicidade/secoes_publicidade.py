@@ -25,8 +25,12 @@ def exibir_expander_fora_ads(df_vendas_geral, df_ads_geral):
         st.write(f"💼 Total: R$ {total:,.2f}")
         st.dataframe(df_fora)
 
-def exibir_metricas_aggregadas(m7, m15, m30):
-    st.subheader("📊 Métricas Agregadas")
+def exibir_metricas_aggregadas(m7, m15, m30, data_desde=None, data_ate=None):
+    titulo = "📊 Métricas Agregadas"
+    if data_desde and data_ate:
+        titulo += f" — 7d ({data_desde.strftime('%d/%m')} a {data_ate.strftime('%d/%m')})"
+    st.subheader(titulo)
+
     r1, r2, r3 = st.columns(3)
     r1.metric("ACoS 30 dias", f"{m30['ACoS (%)']:.2f}%")
     r2.metric("ACoS 15 dias", f"{m15['ACoS (%)']:.2f}%")

@@ -78,7 +78,6 @@ def render_publicidade(region_key: str):
 )
     vendas30 = vendas30[vendas30["codigo_do_anuncio"].isin(ads30["codigo_do_anuncio"])]
 
-
     exibir_expander_vendas(vendas30)
     exibir_expander_fora_ads(df_vendas_geral, df_ads_geral)
 
@@ -87,5 +86,8 @@ def render_publicidade(region_key: str):
     m30 = calcular_metricas_publicidade(ads30, vendas30)
 
 
-    exibir_metricas_aggregadas(m7, m15, m30)
+    data_desde = ads7["desde"].min().date()
+    data_ate = ads7["ate"].max().date()
+    exibir_metricas_aggregadas(m7, m15, m30, data_desde=data_desde, data_ate=data_ate)
+
     exibir_projecoes(m7, m15)
